@@ -1,0 +1,33 @@
+cd /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python
+
+# 1. Create a virtual environment
+uv venv
+
+# 2. Activate the virtual environment
+source .venv/bin/activate
+
+# 3. Install dependencies
+uv pip install -e ".[ollama]"
+
+# 1. Enter the project directory
+cd /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python
+
+# 2. Activate the virtual environment
+source .venv/bin/activate
+
+# 3. Run the code
+python3 your_script.py
+
+# Single question
+python3 ask_rag.py "your_question"
+
+# Batch questions
+python3 batch_ask.py questions.txt
+
+# Official example (requires OPENAI_API_KEY)
+export OPENAI_API_KEY="your_key"
+python3 examples/question_answering/graphrag.py
+
+--------------------------------------------------
+Use the following Cypher query to visualize all nodes and relationships in Neo4j:
+MATCH (n)-[r]->(m) RETURN n,r,m
