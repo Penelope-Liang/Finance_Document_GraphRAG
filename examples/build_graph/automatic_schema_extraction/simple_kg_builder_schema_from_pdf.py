@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import neo4j
 
-from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
+from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
 from neo4j_graphrag.llm import OpenAILLM
 from neo4j_graphrag.embeddings import OpenAIEmbeddings
 

@@ -8,9 +8,9 @@ import asyncio
 import logging
 from typing import Any
 
-from neo4j_graphrag.experimental.pipeline import Pipeline, Component, DataModel
-from neo4j_graphrag.experimental.pipeline.notification import Event, EventType
-from neo4j_graphrag.experimental.pipeline.types.context import RunContext
+from neo4j_graphrag.kg_builder.pipeline import Pipeline, Component, DataModel
+from neo4j_graphrag.kg_builder.pipeline.notification import Event, EventType
+from neo4j_graphrag.kg_builder.pipeline.types.context import RunContext
 
 logger = logging.getLogger(__name__)
 logging.basicConfig()

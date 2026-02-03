@@ -3,7 +3,7 @@ from neo4j_graphrag.exceptions import (
     PromptMissingInputError,
     PromptMissingPlaceholderError,
 )
-from neo4j_graphrag.generation.prompts import PromptTemplate
+from neo4j_graphrag.rag.prompts import PromptTemplate
 
 
 def test_prompt_template_all_default() -> None:

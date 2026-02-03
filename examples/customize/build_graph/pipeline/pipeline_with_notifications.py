@@ -8,14 +8,14 @@ import asyncio
 import logging
 
 import neo4j
-from neo4j_graphrag.experimental.components.kg_writer import Neo4jWriter
-from neo4j_graphrag.experimental.components.lexical_graph import LexicalGraphBuilder
-from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter import (
+from neo4j_graphrag.kg_builder.components.kg_writer import Neo4jWriter
+from neo4j_graphrag.kg_builder.components.lexical_graph import LexicalGraphBuilder
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import (
     FixedSizeSplitter,
 )
-from neo4j_graphrag.experimental.pipeline import Pipeline
-from neo4j_graphrag.experimental.pipeline.pipeline import PipelineResult
-from neo4j_graphrag.experimental.pipeline.notification import Event
+from neo4j_graphrag.kg_builder.pipeline import Pipeline
+from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
+from neo4j_graphrag.kg_builder.pipeline.notification import Event
 
 logger = logging.getLogger(__name__)
 logging.basicConfig()

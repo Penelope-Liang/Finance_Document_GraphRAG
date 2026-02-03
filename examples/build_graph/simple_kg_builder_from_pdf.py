@@ -32,18 +32,18 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
 
-from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
-from neo4j_graphrag.experimental.pipeline.pipeline import PipelineResult
-from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
+from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
+from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
 from neo4j_graphrag.llm import LLMInterfaceV2
 
 # === Entity Resolution imports ===
 # 方式1: 精确匹配（默认）
-# from neo4j_graphrag.experimental.components.resolver import SinglePropertyExactMatchResolver
+# from neo4j_graphrag.kg_builder.components.resolver import SinglePropertyExactMatchResolver
 # 方式2: 模糊匹配（需要 rapidfuzz）
-# from neo4j_graphrag.experimental.components.resolver import FuzzyMatchResolver
+# from neo4j_graphrag.kg_builder.components.resolver import FuzzyMatchResolver
 # 方式3: 语义匹配（需要 spacy）
-from neo4j_graphrag.experimental.components.resolver import SpaCySemanticMatchResolver
+from neo4j_graphrag.kg_builder.components.resolver import SpaCySemanticMatchResolver
 
 # Neo4j db infos
 URI = os.environ.get("NEO4J_URI", "neo4j+s://998e2e0a.databases.neo4j.io")

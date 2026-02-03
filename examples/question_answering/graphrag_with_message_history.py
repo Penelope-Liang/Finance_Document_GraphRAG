@@ -6,7 +6,7 @@ Requires OPENAI_API_KEY to be in the env var.
 
 import neo4j
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
-from neo4j_graphrag.generation import GraphRAG
+from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.llm import OpenAILLM
 from neo4j_graphrag.retrievers import VectorCypherRetriever
 

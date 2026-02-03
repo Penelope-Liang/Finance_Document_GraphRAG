@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import Dict, Optional
 
-from neo4j_graphrag.experimental.components.pdf_loader import DataLoader
-from neo4j_graphrag.experimental.components.types import DocumentInfo, PdfDocument
+from neo4j_graphrag.kg_builder.components.pdf_loader import DataLoader
+from neo4j_graphrag.kg_builder.components.types import DocumentInfo, PdfDocument
 
 
 class MyLoader(DataLoader):

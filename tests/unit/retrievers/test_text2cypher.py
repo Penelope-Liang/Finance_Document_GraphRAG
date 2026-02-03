@@ -23,7 +23,7 @@ from neo4j_graphrag.exceptions import (
     SearchValidationError,
     Text2CypherRetrievalError,
 )
-from neo4j_graphrag.generation.prompts import Text2CypherTemplate
+from neo4j_graphrag.rag.prompts import Text2CypherTemplate
 from neo4j_graphrag.llm import LLMResponse
 from neo4j_graphrag.retrievers.text2cypher import Text2CypherRetriever, extract_cypher
 from neo4j_graphrag.types import RetrieverResult, RetrieverResultItem

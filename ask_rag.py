@@ -25,7 +25,7 @@ import warnings
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
-from neo4j_graphrag.generation import GraphRAG
+from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.retrievers import VectorRetriever, VectorCypherRetriever, HybridCypherRetriever
 
 # Suppress deprecation warnings from neo4j_graphrag

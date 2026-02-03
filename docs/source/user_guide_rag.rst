@@ -24,7 +24,7 @@ In practice, it's done with only a few lines of code:
     from neo4j import GraphDatabase
     from neo4j_graphrag.retrievers import VectorRetriever
     from neo4j_graphrag.llm import OpenAILLM
-    from neo4j_graphrag.generation import GraphRAG
+    from neo4j_graphrag.rag import GraphRAG
     from neo4j_graphrag.embeddings import OpenAIEmbeddings
 
     # 1. Neo4j driver
@@ -239,7 +239,7 @@ Its interface is compatible with our `GraphRAG` interface, facilitating integrat
 
 .. code:: python
 
-    from neo4j_graphrag.generation import GraphRAG
+    from neo4j_graphrag.rag import GraphRAG
     from langchain_community.chat_models import ChatOllama
 
     # retriever = ...
@@ -390,7 +390,7 @@ class and pass it to the `GraphRAG` pipeline object during initialization:
 
 .. code:: python
 
-    from neo4j_graphrag.generation import RagTemplate, GraphRAG
+    from neo4j_graphrag.rag import RagTemplate, GraphRAG
 
     # retriever = ...
     # llm = ...

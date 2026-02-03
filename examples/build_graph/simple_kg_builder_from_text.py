@@ -12,9 +12,9 @@ import logging
 
 import neo4j
 from neo4j_graphrag.embeddings import OpenAIEmbeddings
-from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
-from neo4j_graphrag.experimental.pipeline.pipeline import PipelineResult
-from neo4j_graphrag.experimental.pipeline.types.schema import (
+from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
+from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
+from neo4j_graphrag.kg_builder.pipeline.types.schema import (
     EntityInputType,
     RelationInputType,
 )

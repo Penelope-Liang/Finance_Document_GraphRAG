@@ -17,9 +17,9 @@ from unittest.mock import MagicMock, call
 
 import pytest
 from neo4j_graphrag.exceptions import RagInitializationError, SearchValidationError
-from neo4j_graphrag.generation.graphrag import GraphRAG
-from neo4j_graphrag.generation.prompts import RagTemplate
-from neo4j_graphrag.generation.types import RagResultModel
+from neo4j_graphrag.rag.graphrag import GraphRAG
+from neo4j_graphrag.rag.prompts import RagTemplate
+from neo4j_graphrag.rag.types import RagResultModel
 from neo4j_graphrag.llm import LLMResponse
 from neo4j_graphrag.message_history import InMemoryMessageHistory
 from neo4j_graphrag.types import LLMMessage, RetrieverResult, RetrieverResultItem

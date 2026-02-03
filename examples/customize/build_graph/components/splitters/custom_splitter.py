@@ -1,5 +1,5 @@
-from neo4j_graphrag.experimental.components.text_splitters.base import TextSplitter
-from neo4j_graphrag.experimental.components.types import TextChunk, TextChunks
+from neo4j_graphrag.kg_builder.components.text_splitters.base import TextSplitter
+from neo4j_graphrag.kg_builder.components.types import TextChunk, TextChunks
 
 
 class MySplitter(TextSplitter):

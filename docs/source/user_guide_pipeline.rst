@@ -20,8 +20,8 @@ such as chunking documents or saving results to Neo4j.
 This package includes a few default components, but developers can create
 their own by following these steps:
 
-1. Create a subclass of the Pydantic `neo4j_graphrag.experimental.pipeline.DataModel` to represent the data being returned by the component
-2. Create a subclass of `neo4j_graphrag.experimental.pipeline.Component`
+1. Create a subclass of the Pydantic `neo4j_graphrag.kg_builder.pipeline.DataModel` to represent the data being returned by the component
+2. Create a subclass of `neo4j_graphrag.kg_builder.pipeline.Component`
 3. Create a `run` method in this new class and specify the required inputs and output model using the just created `DataModel`
 4. Implement the run method: it's an `async` method, allowing tasks to be parallelized and awaited within this method.
 
@@ -30,7 +30,7 @@ the resulting sum:
 
 .. code:: python
 
-    from neo4j_graphrag.experimental.pipeline import Component, DataModel
+    from neo4j_graphrag.kg_builder.pipeline import Component, DataModel
 
     class IntResultModel(DataModel):
         result: int
@@ -54,7 +54,7 @@ Here's how to create a simple pipeline and propagate results from one component 
 .. code:: python
 
     import asyncio
-    from neo4j_graphrag.experimental.pipeline import Pipeline
+    from neo4j_graphrag.kg_builder.pipeline import Pipeline
 
     pipe = Pipeline()
     pipe.add_component(ComponentAdd(), "a")
@@ -106,7 +106,7 @@ Pipelines can be visualized using the `draw` method:
 
 .. code:: python
 
-    from neo4j_graphrag.experimental.pipeline import Pipeline
+    from neo4j_graphrag.kg_builder.pipeline import Pipeline
 
     pipe = Pipeline()
     # ... define components and connections
@@ -153,8 +153,8 @@ See :ref:`pipelineevent` and :ref:`taskevent` to see what is sent in each event 
     import asyncio
     import logging
 
-    from neo4j_graphrag.experimental.pipeline import Pipeline
-    from neo4j_graphrag.experimental.pipeline.notification import Event
+    from neo4j_graphrag.kg_builder.pipeline import Pipeline
+    from neo4j_graphrag.kg_builder.pipeline.notification import Event
 
     logger = logging.getLogger(__name__)
     logging.basicConfig()
@@ -184,8 +184,8 @@ Components can send progress notifications using the `notify` function from
 
 .. code:: python
 
-    from neo4j_graphrag.experimental.pipeline import Component, DataModel
-    from neo4j_graphrag.experimental.pipeline.types.context import RunContext
+    from neo4j_graphrag.kg_builder.pipeline import Component, DataModel
+    from neo4j_graphrag.kg_builder.pipeline.types.context import RunContext
 
     class IntResultModel(DataModel):
         result: int

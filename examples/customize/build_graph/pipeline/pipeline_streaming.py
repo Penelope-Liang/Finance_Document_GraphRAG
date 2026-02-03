@@ -1,9 +1,9 @@
 import asyncio
 
-from neo4j_graphrag.experimental.pipeline.component import Component, DataModel
-from neo4j_graphrag.experimental.pipeline.pipeline import Pipeline
-from neo4j_graphrag.experimental.pipeline.notification import EventType, Event
-from neo4j_graphrag.experimental.pipeline.types.context import RunContext
+from neo4j_graphrag.kg_builder.pipeline.component import Component, DataModel
+from neo4j_graphrag.kg_builder.pipeline.pipeline import Pipeline
+from neo4j_graphrag.kg_builder.pipeline.notification import EventType, Event
+from neo4j_graphrag.kg_builder.pipeline.types.context import RunContext
 
 
 # Define some example components with progress notifications

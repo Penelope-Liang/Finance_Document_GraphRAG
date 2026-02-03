@@ -1,7 +1,7 @@
-from neo4j_graphrag.experimental.components.lexical_graph import (
+from neo4j_graphrag.kg_builder.components.lexical_graph import (
     LexicalGraphBuilder,
 )
-from neo4j_graphrag.experimental.components.types import (
+from neo4j_graphrag.kg_builder.components.types import (
     GraphResult,
     LexicalGraphConfig,
     TextChunk,

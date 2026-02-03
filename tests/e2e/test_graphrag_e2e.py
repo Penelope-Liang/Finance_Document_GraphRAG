@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, call
 import neo4j
 import pytest
 from neo4j_graphrag.exceptions import LLMGenerationError
-from neo4j_graphrag.generation.graphrag import GraphRAG
-from neo4j_graphrag.generation.types import RagResultModel
+from neo4j_graphrag.rag.graphrag import GraphRAG
+from neo4j_graphrag.rag.types import RagResultModel
 from neo4j_graphrag.llm import LLMResponse
 from neo4j_graphrag.message_history import Neo4jMessageHistory
 from neo4j_graphrag.retrievers import VectorCypherRetriever

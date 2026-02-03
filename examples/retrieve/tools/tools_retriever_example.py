@@ -29,7 +29,7 @@ from datetime import datetime, date
 
 import neo4j
 
-from neo4j_graphrag.generation import GraphRAG
+from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.retrievers.base import Retriever
 from neo4j_graphrag.retrievers.tools_retriever import ToolsRetriever
 from neo4j_graphrag.types import RawSearchResult

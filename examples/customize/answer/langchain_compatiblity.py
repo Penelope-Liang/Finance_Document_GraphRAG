@@ -8,7 +8,7 @@ Requires OPENAI_API_KEY to be in the env var.
 import neo4j
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
-from neo4j_graphrag.generation import GraphRAG
+from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.retrievers import VectorCypherRetriever
 
 # Define database credentials

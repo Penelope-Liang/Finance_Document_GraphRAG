@@ -37,156 +37,156 @@ LLMMessage
 RagResultModel
 ==============
 
-.. autoclass:: neo4j_graphrag.generation.types.RagResultModel
+.. autoclass:: neo4j_graphrag.rag.types.RagResultModel
 
 DocumentInfo
 ============
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.DocumentInfo
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.DocumentInfo
 
 
 TextChunk
 =========
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.TextChunk
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.TextChunk
 
 TextChunks
 ==========
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.TextChunks
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.TextChunks
 
 Neo4jNode
 =========
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.Neo4jNode
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.Neo4jNode
 
 Neo4jRelationship
 =================
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.Neo4jRelationship
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.Neo4jRelationship
 
 Neo4jGraph
 ==========
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.Neo4jGraph
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.Neo4jGraph
 
 KGWriterModel
 =============
 
-.. autoclass:: neo4j_graphrag.experimental.components.kg_writer.KGWriterModel
+.. autoclass:: neo4j_graphrag.kg_builder.components.kg_writer.KGWriterModel
 
 PropertyType
 ============
 
-.. autoclass:: neo4j_graphrag.experimental.components.schema.PropertyType
+.. autoclass:: neo4j_graphrag.kg_builder.components.schema.PropertyType
 
 NodeType
 ========
 
-.. autoclass:: neo4j_graphrag.experimental.components.schema.NodeType
+.. autoclass:: neo4j_graphrag.kg_builder.components.schema.NodeType
 
 RelationshipType
 ================
 
-.. autoclass:: neo4j_graphrag.experimental.components.schema.RelationshipType
+.. autoclass:: neo4j_graphrag.kg_builder.components.schema.RelationshipType
 
 GraphSchema
 ===========
 
-.. autoclass:: neo4j_graphrag.experimental.components.schema.GraphSchema
+.. autoclass:: neo4j_graphrag.kg_builder.components.schema.GraphSchema
 
 LexicalGraphConfig
 ===================
 
-.. autoclass:: neo4j_graphrag.experimental.components.types.LexicalGraphConfig
+.. autoclass:: neo4j_graphrag.kg_builder.components.types.LexicalGraphConfig
 
 
 Neo4jDriverType
 ===============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.Neo4jDriverType
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.Neo4jDriverType
 
 
 Neo4jDriverConfig
 =================
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.Neo4jDriverConfig
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.Neo4jDriverConfig
 
 
 LLMType
 =======
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.LLMType
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.LLMType
 
 
 LLMConfig
 =========
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.LLMConfig
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.LLMConfig
 
 
 EmbedderType
 ============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.EmbedderType
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.EmbedderType
 
 
 EmbedderConfig
 ==============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.EmbedderConfig
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.EmbedderConfig
 
 
 ComponentType
 =============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.ComponentType
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.ComponentType
 
 
 ComponentConfig
 ===============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.object_config.ComponentConfig
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.object_config.ComponentConfig
 
 
 ParamFromEnvConfig
 ==================
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.config.param_resolver.ParamFromEnvConfig
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.config.param_resolver.ParamFromEnvConfig
 
 
 EventType
 =========
 
-.. autoenum:: neo4j_graphrag.experimental.pipeline.notification.EventType
+.. autoenum:: neo4j_graphrag.kg_builder.pipeline.notification.EventType
 
 
 PipelineEvent
 ==============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.notification.PipelineEvent
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.notification.PipelineEvent
 
 TaskEvent
 ==============
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.notification.TaskEvent
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.notification.TaskEvent
 
 
 EventCallbackProtocol
 =====================
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.notification.EventCallbackProtocol
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.notification.EventCallbackProtocol
     :members: __call__
 
 
 TaskProgressCallbackProtocol
 ============================
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.types.context.TaskProgressNotifierProtocol
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.types.context.TaskProgressNotifierProtocol
     :members: __call__
 
 
 RunContext
 ==========
 
-.. autoclass:: neo4j_graphrag.experimental.pipeline.types.context.RunContext
+.. autoclass:: neo4j_graphrag.kg_builder.pipeline.types.context.RunContext

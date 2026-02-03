@@ -16,8 +16,8 @@ import logging
 import os
 from pathlib import Path
 
-from neo4j_graphrag.experimental.pipeline.config.runner import PipelineRunner
-from neo4j_graphrag.experimental.pipeline.pipeline import PipelineResult
+from neo4j_graphrag.kg_builder.pipeline.config.runner import PipelineRunner
+from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
 
 logging.basicConfig()
 logging.getLogger("neo4j_graphrag").setLevel(logging.DEBUG)

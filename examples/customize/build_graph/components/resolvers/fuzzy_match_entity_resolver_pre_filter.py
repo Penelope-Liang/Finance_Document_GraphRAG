@@ -11,10 +11,10 @@ by the resolved ones, but all relationships are kept.
 See apoc.refactor.mergeNodes documentation for more details.
 """
 
-from neo4j_graphrag.experimental.components.resolver import (
+from neo4j_graphrag.kg_builder.components.resolver import (
     FuzzyMatchResolver,
 )
-from neo4j_graphrag.experimental.components.types import ResolutionStats
+from neo4j_graphrag.kg_builder.components.types import ResolutionStats
 
 import neo4j
 

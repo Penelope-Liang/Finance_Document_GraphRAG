@@ -24,21 +24,21 @@ import asyncio
 import logging
 
 import neo4j
-from neo4j_graphrag.experimental.components.entity_relation_extractor import (
+from neo4j_graphrag.kg_builder.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,
     OnError,
 )
-from neo4j_graphrag.experimental.components.kg_writer import Neo4jWriter
-from neo4j_graphrag.experimental.components.pdf_loader import PdfLoader
-from neo4j_graphrag.experimental.components.schema import (
+from neo4j_graphrag.kg_builder.components.kg_writer import Neo4jWriter
+from neo4j_graphrag.kg_builder.components.pdf_loader import PdfLoader
+from neo4j_graphrag.kg_builder.components.schema import (
     SchemaBuilder,
     NodeType,
     RelationshipType,
 )
-from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter import (
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import (
     FixedSizeSplitter,
 )
-from neo4j_graphrag.experimental.pipeline.pipeline import PipelineResult
+from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
 from neo4j_graphrag.llm import LLMInterface, OpenAILLM
 
 logging.basicConfig(level=logging.INFO)
@@ -47,7 +47,7 @@ logging.basicConfig(level=logging.INFO)
 async def define_and_run_pipeline(
     neo4j_driver: neo4j.Driver, llm: LLMInterface
 ) -> PipelineResult:
-    from neo4j_graphrag.experimental.pipeline import Pipeline
+    from neo4j_graphrag.kg_builder.pipeline import Pipeline
 
     # Instantiate Entity and Relation objects
     node_types = [

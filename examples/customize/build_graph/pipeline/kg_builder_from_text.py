@@ -17,23 +17,23 @@ from __future__ import annotations
 import asyncio
 
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
-from neo4j_graphrag.experimental.components.embedder import TextChunkEmbedder
-from neo4j_graphrag.experimental.components.entity_relation_extractor import (
+from neo4j_graphrag.kg_builder.components.embedder import TextChunkEmbedder
+from neo4j_graphrag.kg_builder.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,
     OnError,
 )
-from neo4j_graphrag.experimental.components.kg_writer import Neo4jWriter
-from neo4j_graphrag.experimental.components.schema import (
+from neo4j_graphrag.kg_builder.components.kg_writer import Neo4jWriter
+from neo4j_graphrag.kg_builder.components.schema import (
     SchemaBuilder,
     NodeType,
     PropertyType,
     RelationshipType,
 )
-from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter import (
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import (
     FixedSizeSplitter,
 )
-from neo4j_graphrag.experimental.pipeline import Pipeline
-from neo4j_graphrag.experimental.pipeline.pipeline import PipelineResult
+from neo4j_graphrag.kg_builder.pipeline import Pipeline
+from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
 from neo4j_graphrag.llm import LLMInterface, OpenAILLM
 
 import neo4j

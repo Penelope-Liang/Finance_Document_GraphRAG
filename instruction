@@ -1,33 +1,52 @@
+# GraphRAG Project - Quick Reference
+
+SSH to Mini: `ssh penelopel@100.120.75.8`
+
+## 1. First-Time Setup (Run Once)
+
+```bash
 cd /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python
 
-# 1. Create a virtual environment
+# Create virtual environment
 uv venv
 
-# 2. Activate the virtual environment
-source .venv/bin/activate
+# Install dependencies
+uv sync --all-extras
+```
 
-# 3. Install dependencies
-uv pip install -e ".[ollama]"
+## 2. Running Code (Every Time)
 
-# 1. Enter the project directory
+```bash
+# 1. Navigate to project directory
 cd /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python
 
-# 2. Activate the virtual environment
+# 2. Run code (recommended - no need to manually activate venv)
+.venv/bin/python ask_rag.py "your question"
+
+# Or activate venv first, then run
 source .venv/bin/activate
+python ask_rag.py "your question"
+```
 
-# 3. Run the code
-python3 your_script.py
+## 3. Common Commands
 
+```bash
 # Single question
-python3 ask_rag.py "your_question"
+.venv/bin/python ask_rag.py "What accounting standards were used?"
 
 # Batch questions
-python3 batch_ask.py questions.txt
+.venv/bin/python batch_ask.py questions.txt
 
-# Official example (requires OPENAI_API_KEY)
-export OPENAI_API_KEY="your_key"
-python3 examples/question_answering/graphrag.py
+# Build knowledge graph (from PDF)
+.venv/bin/python examples/build_graph/simple_kg_builder_from_pdf.py
+```
 
---------------------------------------------------
-Use the following Cypher query to visualize all nodes and relationships in Neo4j:
-MATCH (n)-[r]->(m) RETURN n,r,m
+## 4. Git Sync (Pro <-> Mini)
+
+```bash
+# After editing code on Pro
+git add . && git commit -m "description" && git push
+
+# Pull latest code on Mini
+git pull
+```

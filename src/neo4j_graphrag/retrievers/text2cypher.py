@@ -28,7 +28,7 @@ from neo4j_graphrag.exceptions import (
     SearchValidationError,
     Text2CypherRetrievalError,
 )
-from neo4j_graphrag.generation.prompts import Text2CypherTemplate
+from neo4j_graphrag.rag.prompts import Text2CypherTemplate
 from neo4j_graphrag.llm import LLMInterface
 from neo4j_graphrag.retrievers.base import Retriever
 from neo4j_graphrag.schema import get_schema
@@ -95,7 +95,7 @@ class Text2CypherRetriever(Retriever):
 
     Args:
         driver (neo4j.Driver): The Neo4j Python driver.
-        llm (neo4j_graphrag.generation.llm.LLMInterface): LLM object to generate the Cypher query.
+        llm (neo4j_graphrag.rag.llm.LLMInterface): LLM object to generate the Cypher query.
         neo4j_schema (Optional[str]): Neo4j schema used to generate the Cypher query.
         examples (Optional[list[str], optional): Optional user input/query pairs for the LLM to use as examples.
         custom_prompt (Optional[str]): Optional custom prompt to use instead of auto generated prompt. Will include the neo4j_schema for schema and examples for examples prompt parameters, if they are provided.
