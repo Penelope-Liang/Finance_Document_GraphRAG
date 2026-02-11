@@ -15,10 +15,10 @@
 import logging
 from typing import Any, ClassVar, Optional
 
-from neo4j_graphrag.experimental.pipeline.config.pipeline_config import (
+from neo4j_graphrag.kg_builder.pipeline.config.pipeline_config import (
     AbstractPipelineConfig,
 )
-from neo4j_graphrag.experimental.pipeline.types.definitions import ComponentDefinition
+from neo4j_graphrag.kg_builder.pipeline.types.definitions import ComponentDefinition
 
 logger = logging.getLogger(__name__)
 

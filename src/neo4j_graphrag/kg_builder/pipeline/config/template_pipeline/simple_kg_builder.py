@@ -28,44 +28,44 @@ import warnings
 from pydantic import ConfigDict, Field, model_validator, field_validator
 from typing_extensions import Self
 
-from neo4j_graphrag.experimental.components.embedder import TextChunkEmbedder
-from neo4j_graphrag.experimental.components.entity_relation_extractor import (
+from neo4j_graphrag.kg_builder.components.embedder import TextChunkEmbedder
+from neo4j_graphrag.kg_builder.components.entity_relation_extractor import (
     EntityRelationExtractor,
     LLMEntityRelationExtractor,
     OnError,
 )
-from neo4j_graphrag.experimental.components.graph_pruning import GraphPruning
-from neo4j_graphrag.experimental.components.kg_writer import KGWriter, Neo4jWriter
-from neo4j_graphrag.experimental.components.pdf_loader import PdfLoader
-from neo4j_graphrag.experimental.components.resolver import (
+from neo4j_graphrag.kg_builder.components.graph_pruning import GraphPruning
+from neo4j_graphrag.kg_builder.components.kg_writer import KGWriter, Neo4jWriter
+from neo4j_graphrag.kg_builder.components.pdf_loader import PdfLoader
+from neo4j_graphrag.kg_builder.components.resolver import (
     EntityResolver,
     SinglePropertyExactMatchResolver,
 )
-from neo4j_graphrag.experimental.components.schema import (
+from neo4j_graphrag.kg_builder.components.schema import (
     SchemaBuilder,
     GraphSchema,
     SchemaFromTextExtractor,
     BaseSchemaBuilder,
 )
-from neo4j_graphrag.experimental.components.text_splitters.base import TextSplitter
-from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter import (
+from neo4j_graphrag.kg_builder.components.text_splitters.base import TextSplitter
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import (
     FixedSizeSplitter,
 )
-from neo4j_graphrag.experimental.components.types import (
+from neo4j_graphrag.kg_builder.components.types import (
     LexicalGraphConfig,
 )
-from neo4j_graphrag.experimental.pipeline.config.object_config import ComponentType
-from neo4j_graphrag.experimental.pipeline.config.template_pipeline.base import (
+from neo4j_graphrag.kg_builder.pipeline.config.object_config import ComponentType
+from neo4j_graphrag.kg_builder.pipeline.config.template_pipeline.base import (
     TemplatePipelineConfig,
 )
-from neo4j_graphrag.experimental.pipeline.config.types import PipelineType
-from neo4j_graphrag.experimental.pipeline.exceptions import PipelineDefinitionError
-from neo4j_graphrag.experimental.pipeline.types.definitions import ConnectionDefinition
-from neo4j_graphrag.experimental.pipeline.types.schema import (
+from neo4j_graphrag.kg_builder.pipeline.config.types import PipelineType
+from neo4j_graphrag.kg_builder.pipeline.exceptions import PipelineDefinitionError
+from neo4j_graphrag.kg_builder.pipeline.types.definitions import ConnectionDefinition
+from neo4j_graphrag.kg_builder.pipeline.types.schema import (
     EntityInputType,
     RelationInputType,
 )
-from neo4j_graphrag.generation.prompts import ERExtractionTemplate
+from neo4j_graphrag.rag.prompts import ERExtractionTemplate
 
 
 class SimpleKGPipelineConfig(TemplatePipelineConfig):

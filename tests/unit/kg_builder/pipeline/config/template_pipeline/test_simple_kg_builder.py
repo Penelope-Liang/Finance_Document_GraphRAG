@@ -18,31 +18,31 @@ from unittest.mock import Mock, patch
 import neo4j
 import pytest
 from neo4j_graphrag.embeddings import Embedder
-from neo4j_graphrag.experimental.components.embedder import TextChunkEmbedder
-from neo4j_graphrag.experimental.components.entity_relation_extractor import (
+from neo4j_graphrag.kg_builder.components.embedder import TextChunkEmbedder
+from neo4j_graphrag.kg_builder.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,
     OnError,
 )
-from neo4j_graphrag.experimental.components.kg_writer import Neo4jWriter
-from neo4j_graphrag.experimental.components.pdf_loader import PdfLoader
-from neo4j_graphrag.experimental.components.schema import (
+from neo4j_graphrag.kg_builder.components.kg_writer import Neo4jWriter
+from neo4j_graphrag.kg_builder.components.pdf_loader import PdfLoader
+from neo4j_graphrag.kg_builder.components.schema import (
     SchemaBuilder,
     SchemaFromTextExtractor,
     GraphSchema,
 )
-from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter import (
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import (
     FixedSizeSplitter,
 )
-from neo4j_graphrag.experimental.pipeline.config.object_config import ComponentConfig
-from neo4j_graphrag.experimental.pipeline.config.template_pipeline import (
+from neo4j_graphrag.kg_builder.pipeline.config.object_config import ComponentConfig
+from neo4j_graphrag.kg_builder.pipeline.config.template_pipeline import (
     SimpleKGPipelineConfig,
 )
-from neo4j_graphrag.experimental.pipeline.exceptions import PipelineDefinitionError
-from neo4j_graphrag.experimental.pipeline.types.schema import (
+from neo4j_graphrag.kg_builder.pipeline.exceptions import PipelineDefinitionError
+from neo4j_graphrag.kg_builder.pipeline.types.schema import (
     EntityInputType,
     RelationInputType,
 )
-from neo4j_graphrag.generation.prompts import ERExtractionTemplate
+from neo4j_graphrag.rag.prompts import ERExtractionTemplate
 from neo4j_graphrag.llm import LLMInterface
 
 
@@ -72,7 +72,7 @@ def test_simple_kg_pipeline_config_pdf_loader_class_overwrite_but_from_pdf_is_fa
     assert config._get_pdf_loader() is None
 
 
-@patch("neo4j_graphrag.experimental.pipeline.config.object_config.ComponentType.parse")
+@patch("neo4j_graphrag.kg_builder.pipeline.config.object_config.ComponentType.parse")
 def test_simple_kg_pipeline_config_pdf_loader_from_pdf_is_true_class_overwrite_from_config(
     mock_component_parse: Mock,
 ) -> None:
@@ -93,7 +93,7 @@ def test_simple_kg_pipeline_config_text_splitter() -> None:
     assert isinstance(config._get_splitter(), FixedSizeSplitter)
 
 
-@patch("neo4j_graphrag.experimental.pipeline.config.object_config.ComponentType.parse")
+@patch("neo4j_graphrag.kg_builder.pipeline.config.object_config.ComponentType.parse")
 def test_simple_kg_pipeline_config_text_splitter_overwrite(
     mock_component_parse: Mock,
 ) -> None:
@@ -109,7 +109,7 @@ def test_simple_kg_pipeline_config_text_splitter_overwrite(
 
 
 @patch(
-    "neo4j_graphrag.experimental.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_embedder"
+    "neo4j_graphrag.kg_builder.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_embedder"
 )
 def test_simple_kg_pipeline_config_chunk_embedder(
     mock_embedder: Mock, embedder: Embedder
@@ -122,7 +122,7 @@ def test_simple_kg_pipeline_config_chunk_embedder(
 
 
 @patch(
-    "neo4j_graphrag.experimental.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_llm"
+    "neo4j_graphrag.kg_builder.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_llm"
 )
 def test_simple_kg_pipeline_config_automatic_schema(
     mock_llm: Mock, llm: LLMInterface
@@ -163,7 +163,7 @@ def test_simple_kg_pipeline_config_schema_run_params() -> None:
 
 
 @patch(
-    "neo4j_graphrag.experimental.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_llm"
+    "neo4j_graphrag.kg_builder.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_llm"
 )
 def test_simple_kg_pipeline_config_extractor(mock_llm: Mock, llm: LLMInterface) -> None:
     mock_llm.return_value = llm
@@ -179,11 +179,11 @@ def test_simple_kg_pipeline_config_extractor(mock_llm: Mock, llm: LLMInterface) 
 
 
 @patch(
-    "neo4j_graphrag.experimental.components.kg_writer.get_version",
+    "neo4j_graphrag.kg_builder.components.kg_writer.get_version",
     return_value=((5, 23, 0), False, False),
 )
 @patch(
-    "neo4j_graphrag.experimental.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_neo4j_driver"
+    "neo4j_graphrag.kg_builder.pipeline.config.template_pipeline.simple_kg_builder.SimpleKGPipelineConfig.get_default_neo4j_driver"
 )
 def test_simple_kg_pipeline_config_writer(
     mock_driver: Mock,
@@ -201,10 +201,10 @@ def test_simple_kg_pipeline_config_writer(
 
 
 @patch(
-    "neo4j_graphrag.experimental.components.kg_writer.get_version",
+    "neo4j_graphrag.kg_builder.components.kg_writer.get_version",
     return_value=((5, 23, 0), False, False),
 )
-@patch("neo4j_graphrag.experimental.pipeline.config.object_config.ComponentType.parse")
+@patch("neo4j_graphrag.kg_builder.pipeline.config.object_config.ComponentType.parse")
 def test_simple_kg_pipeline_config_writer_overwrite(
     mock_component_parse: Mock,
     _: Mock,
