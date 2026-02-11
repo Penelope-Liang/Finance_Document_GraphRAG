@@ -18,6 +18,9 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
+
+pytest.importorskip("pinecone")
+
 from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.embeddings.sentence_transformers import (
     SentenceTransformerEmbeddings,

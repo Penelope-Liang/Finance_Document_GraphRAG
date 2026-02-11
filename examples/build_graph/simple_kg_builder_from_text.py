@@ -9,7 +9,6 @@ NB: when building a KG from text, no 'Document' node is created in the Knowledge
 
 import asyncio
 import logging
-
 import neo4j
 from neo4j_graphrag.embeddings import OpenAIEmbeddings
 from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline

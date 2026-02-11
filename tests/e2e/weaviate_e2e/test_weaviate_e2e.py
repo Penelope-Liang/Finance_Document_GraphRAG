@@ -17,6 +17,9 @@ import re
 from typing import Any, Generator
 
 import pytest
+
+pytest.importorskip("weaviate")
+
 from neo4j import Driver
 from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.embeddings.sentence_transformers import (

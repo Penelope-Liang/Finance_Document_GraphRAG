@@ -79,7 +79,6 @@ jobs:
           path: .venv
           key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('**/uv.lock') }}
       - name: Install dependencies
-        if: steps.cached-venv.outputs.cache-hit != 'true'
         run: uv sync --frozen --all-extras --group dev
       - name: Show disk usage after dependency installation
         run: |
