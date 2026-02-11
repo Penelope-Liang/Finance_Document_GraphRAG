@@ -17,12 +17,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os.path
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
 import neo4j
-import weaviate.classes as wvc
 from neo4j_graphrag.indexes import create_vector_index, drop_index_if_exists
-from qdrant_client import models
+
+if TYPE_CHECKING:
+    import weaviate.classes as wvc
+    from qdrant_client import models
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -472,6 +474,10 @@ def build_data_objects(
     # read file from disk
     # this file is from https://github.com/weaviate-tutorials/quickstart/tree/main/data
     # MIT License
+    if q_vector_fmt == "weaviate":
+        import weaviate.classes as wvc
+    elif q_vector_fmt == "qdrant":
+        from qdrant_client import models
     file_name = os.path.join(
         BASE_DIR,
         "./data/jeopardy_tiny_with_vectors_all-MiniLM-L6-v2.json",
