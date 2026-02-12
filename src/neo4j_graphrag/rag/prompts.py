@@ -93,7 +93,7 @@ class PromptTemplate:
 
 
 class RagTemplate(PromptTemplate):
-    DEFAULT_SYSTEM_INSTRUCTIONS = "Answer the user question using the provided context."
+    DEFAULT_SYSTEM_INSTRUCTIONS = "You are a precise question-answering assistant. Return only valid JSON."
     DEFAULT_TEMPLATE = """Context:
 {context}
 
@@ -103,7 +103,18 @@ Examples:
 Question:
 {query_text}
 
-Answer:
+Return ONLY valid JSON:
+{{"final_answer": "string", "evidence": "string"}}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """
     EXPECTED_INPUTS = ["context", "query_text", "examples"]
 

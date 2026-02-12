@@ -12,3 +12,22 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
+
+from neo4j_graphrag.kg_builder.components.data_loader import (
+    AutoLoader,
+    CSVLoader,
+    JSONLoader,
+    JSONLLoader,
+    TextLoader,
+)
+from neo4j_graphrag.kg_builder.components.pdf_loader import DataLoader, PdfLoader
+
+__all__ = [
+    "DataLoader",
+    "PdfLoader",
+    "TextLoader",
+    "JSONLoader",
+    "JSONLLoader",
+    "CSVLoader",
+    "AutoLoader",
+]
