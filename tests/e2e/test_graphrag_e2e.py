@@ -84,7 +84,7 @@ Rules:
 JSON:
 """,
         message_history=None,
-        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+        system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
     )
     assert isinstance(result, RagResultModel)
     assert result.answer == "some text"
@@ -176,7 +176,7 @@ JSON:
             call(
                 input=second_invocation,
                 message_history=message_history.messages,
-                system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+                system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
             ),
         ]
     )
@@ -236,7 +236,7 @@ Rules:
 JSON:
 """,
         message_history=None,
-        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+        system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
     )
     assert isinstance(result, RagResultModel)
     assert result.answer == "some text"
@@ -293,7 +293,7 @@ Rules:
 JSON:
 """,
         message_history=None,
-        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+        system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
     )
     assert result.answer == "some text"
 

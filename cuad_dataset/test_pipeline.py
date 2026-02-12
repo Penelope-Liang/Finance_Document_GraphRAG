@@ -68,6 +68,7 @@ SCRIPT_DIR = Path(__file__).parent
 DATA_PATH = SCRIPT_DIR / "data" / "train_separate_questions.json"
 OUTPUT_DIR = SCRIPT_DIR / "results"
 CHECKPOINT_FILE = OUTPUT_DIR / "checkpoint.json"
+LIVE_JSONL_FILE = OUTPUT_DIR / "live_results.jsonl"  # Real-time output
 
 # LLM settings
 LLM_MODEL = "qwen2.5:72b"
@@ -277,7 +278,11 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5, start_idx: i
     total = len(qas)
     correct_count = sum(1 for r in results if r.get("is_correct", False))
     
-    if start_idx > 0:
+    # Initialize live JSONL file (clear if starting fresh, keep if resuming)
+    if start_idx == 0:
+        LIVE_JSONL_FILE.write_text("")  # Clear file
+        logger.info(f"Live results will be written to: {LIVE_JSONL_FILE}")
+    else:
         logger.info(f"Resuming from question {start_idx + 1}, already processed {len(results)} questions")
     
     # Use tqdm for progress bar
@@ -318,6 +323,10 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5, start_idx: i
             if eval_result["is_correct"]:
                 correct_count += 1
             
+            # Write to live JSONL immediately
+            with open(LIVE_JSONL_FILE, "a") as f:
+                f.write(json.dumps(eval_result, ensure_ascii=False) + "\n")
+            
             # Update progress bar
             accuracy = correct_count / len(results) * 100
             pbar.set_postfix({
@@ -340,6 +349,9 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5, start_idx: i
                 llm_evidence="",
             )
             results.append(eval_result)
+            # Also write error to live JSONL
+            with open(LIVE_JSONL_FILE, "a") as f:
+                f.write(json.dumps(eval_result, ensure_ascii=False) + "\n")
         
         # Save checkpoint periodically
         if i % CHECKPOINT_INTERVAL == 0:

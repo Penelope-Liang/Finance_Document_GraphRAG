@@ -1,107 +1,58 @@
-13:40:51 | INFO | ============================================================
-13:40:51 | INFO | CUAD GraphRAG Test Pipeline
-13:40:51 | INFO | Started at 2026-02-12 13:40:51
-13:40:51 | INFO | ============================================================
-13:40:51 | INFO | Initializing LLM and Embedder...
-13:40:51 | INFO | LLM: qwen2.5:72b
-13:40:51 | INFO | Embedder: bge-m3:latest
-13:40:51 | INFO | Testing LLM connection...
-13:40:55 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:40:55 | INFO | LLM test response: OK...
-13:40:55 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
-13:40:55 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
-13:40:55 | INFO | Context length: 54,290 characters
-13:40:55 | INFO | Questions: 68
-13:40:55 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
-13:41:02 | INFO | Neo4j connection verified
-13:41:02 | INFO | Clearing existing data from Neo4j...
-13:41:02 | INFO | Found 0 existing nodes
-13:41:02 | INFO | Database already empty
-13:41:02 | INFO | Checkpoint saved: stage=kg_build_start, processed=0 questions
-13:41:02 | INFO | ==================================================
-13:41:02 | INFO | Step 1: Building Knowledge Graph
-13:41:02 | INFO | ==================================================
-13:41:02 | INFO | Creating SimpleKGPipeline with schema='FREE'...
-13:41:02 | INFO | SimpleKGPipeline created successfully
-13:41:02 | INFO | Running KG builder on 54,290 chars of text...
-13:41:02 | INFO | PIPELINE_RUNNER: starting pipeline <neo4j_graphrag.kg_builder.pipeline.pipeline.Pipeline object at 0x10ff36790> with run_params={'schema': {'node_types': (), 'relationship_types': (), 'patterns': (), 'constraints': (), 'additional_node_types': True, 'additional_relationship_types': True, 'additional_patterns': True}, 'splitter': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'extractor': {'document_info': {'path': 'document.txt', 'metadata': None, 'document_type': 'inline_text'}}}
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-13:43:22 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:45:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:48:15 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:50:13 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:51:34 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:53:53 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:55:44 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-13:58:02 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:01:28 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:02:51 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:06:10 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:08:43 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:10:20 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:14:02 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:15:16 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-14:15:16 | INFO | Received notification from DBMS server: <GqlStatusObject gql_status='00NA0', status_description="note: successful completion - index or constraint already exists. The command 'CREATE RANGE INDEX __entity__tmp_internal_id IF NOT EXISTS FOR (e:__KGBuilder__) ON (e.__tmp_internal_id)' has no effect. The index or constraint specified by 'RANGE INDEX __entity__tmp_internal_id FOR (e:__KGBuilder__) ON (e.__tmp_internal_id)' already exists.", position=None, raw_classification='SCHEMA', classification=<NotificationClassification.SCHEMA: 'SCHEMA'>, raw_severity='INFORMATION', severity=<NotificationSeverity.INFORMATION: 'INFORMATION'>, diagnostic_record={'_classification': 'SCHEMA', '_severity': 'INFORMATION', 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        CREATE INDEX __entity__tmp_internal_id IF NOT EXISTS FOR (n:__KGBuilder__) ON (n.__tmp_internal_id)\n        '
-14:15:24 | INFO | Received notification from DBMS server: <GqlStatusObject gql_status='03N90', status_description="info: cartesian product. The disconnected pattern '(start:__KGBuilder__ {__tmp_internal_id: row.start_node_id}), (end:__KGBuilder__ {__tmp_internal_id: row.end_node_id})' builds a cartesian product. A cartesian product may produce a large amount of data and slow down query processing.", position=<SummaryInputPosition line=1, column=21, offset=20>, raw_classification='PERFORMANCE', classification=<NotificationClassification.PERFORMANCE: 'PERFORMANCE'>, raw_severity='INFORMATION', severity=<NotificationSeverity.INFORMATION: 'INFORMATION'>, diagnostic_record={'_classification': 'PERFORMANCE', '_severity': 'INFORMATION', '_position': {'offset': 20, 'line': 1, 'column': 21}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: 'UNWIND $rows as row MATCH (start:__KGBuilder__ {__tmp_internal_id: row.start_node_id}),       (end:__KGBuilder__ {__tmp_internal_id: row.end_node_id}) WITH start, end, row CALL apoc.merge.relationship(start, row.type, {}, row.properties, end, row.properties) YIELD rel  WITH rel, row CALL (rel,row) {  WITH rel, row WHERE row.embedding_properties IS NOT NULL UNWIND keys(row.embedding_properties) as emb CALL db.create.setRelationshipVectorProperty(rel, emb, row.embedding_properties[emb]) } RETURN elementId(rel)'
-14:15:25 | INFO | KG built successfully in 2062.9 seconds
-14:15:25 | INFO | Pipeline result: run_id='ea1b8a78-8283-4cc4-a056-856955580372' result={'resolver': {'number_of_nodes_to_resolve': 96, 'number_of_created_nodes': 32}}
-14:15:25 | INFO | Database now has 115 nodes, 15 Chunk nodes
-14:15:25 | INFO | Checkpoint saved: stage=kg_build_complete, processed=0 questions
-14:15:25 | INFO | ==================================================
-14:15:25 | INFO | Step 2: Creating Vector Index
-14:15:25 | INFO | ==================================================
-14:15:25 | INFO | Creating vector index named 'chunk_vector_index'
-14:15:25 | INFO | Received notification from DBMS server: <GqlStatusObject gql_status='00NA0', status_description="note: successful completion - index or constraint already exists. The command 'CREATE VECTOR INDEX chunk_vector_index IF NOT EXISTS FOR (e:Chunk) ON (e.embedding) OPTIONS {indexConfig: {`vector.dimensions`: toInteger($dimensions), `vector.similarity_function`: $similarity_fn}}' has no effect. The index or constraint specified by 'VECTOR INDEX chunk_embedding_index FOR (e:Chunk) ON (e.embedding)' already exists.", position=None, raw_classification='SCHEMA', classification=<NotificationClassification.SCHEMA: 'SCHEMA'>, raw_severity='INFORMATION', severity=<NotificationSeverity.INFORMATION: 'INFORMATION'>, diagnostic_record={'_classification': 'SCHEMA', '_severity': 'INFORMATION', 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: 'CREATE VECTOR INDEX $name IF NOT EXISTS FOR (n:Chunk) ON n.embedding OPTIONS { indexConfig: { `vector.dimensions`: toInteger($dimensions), `vector.similarity_function`: $similarity_fn } }'
-14:15:25 | INFO | Created vector index: chunk_vector_index
-14:15:25 | INFO | Waiting for index to populate...
-14:15:32 | INFO | Checkpoint saved: stage=index_created, processed=0 questions
-14:15:32 | INFO | Waiting 5s for index to be ready...
-14:15:37 | INFO | ==================================================
-14:15:37 | INFO | Step 3: Setting up GraphRAG
-14:15:37 | INFO | ==================================================
-14:15:37 | INFO | Creating VectorCypherRetriever...
-Traceback (most recent call last):
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/retrievers/base.py", line 142, in _fetch_index_infos
-    result = query_result.records[0]
-             ~~~~~~~~~~~~~~~~~~~~^^^
-IndexError: list index out of range
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 477, in <module>
-    asyncio.run(main())
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 190, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 447, in main
-    rag = setup_graphrag(driver, llm, embedder)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 225, in setup_graphrag
-    retriever = VectorCypherRetriever(
-                ^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/retrievers/vector.py", line 301, in __init__
-    self._fetch_index_infos(self.index_name)
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/retrievers/base.py", line 147, in _fetch_index_infos
-    raise Exception(f"No index with name {self.index_name} found") from e
-Exception: No index with name chunk_vector_index found
+16:36:33 | INFO | ============================================================
+16:36:33 | INFO | CUAD GraphRAG Test Pipeline
+16:36:33 | INFO | Started at 2026-02-12 16:36:33
+16:36:33 | INFO | ============================================================
+16:36:33 | INFO | Found checkpoint: stage=index_created, processed=0 questions
+16:36:33 | INFO | Found checkpoint at stage 'index_created', skipping KG build
+16:36:33 | INFO | Initializing LLM and Embedder...
+16:36:33 | INFO | LLM: qwen2.5:72b
+16:36:33 | INFO | Embedder: bge-m3:latest
+16:36:33 | INFO | Testing LLM connection...
+16:36:56 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+16:36:56 | INFO | LLM test response: OK...
+16:36:56 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
+16:36:56 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
+16:36:56 | INFO | Context length: 54,290 characters
+16:36:56 | INFO | Questions: 68
+16:36:56 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
+16:37:03 | INFO | Neo4j connection verified
+16:37:03 | INFO | Skipping KG build (resuming from checkpoint)
+16:37:03 | INFO | ==================================================
+16:37:03 | INFO | Step 3: Setting up GraphRAG
+16:37:03 | INFO | ==================================================
+16:37:03 | INFO | Creating VectorCypherRetriever...
+16:37:03 | INFO | Creating GraphRAG...
+16:37:03 | INFO | GraphRAG initialized successfully
+16:37:03 | INFO | Testing retrieval...
+16:37:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:37:05 | INFO | Retrieval test: found 1 items
+16:37:05 | INFO | ==================================================
+16:37:05 | INFO | Step 4: Running Q&A Evaluation
+16:37:05 | INFO | ==================================================
+Q&A Progress:   0%|          | 0/68 [00:00<?, ?q/s]16:37:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:38:47 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   0%|          | 0/68 [01:42<?, ?q/s, acc=100.0%, time=102.3s, type=unknown]Q&A Progress:   1%|▏         | 1/68 [01:42<1:54:11, 102.26s/q, acc=100.0%, time=102.3s, type=unknown]16:38:48 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:40:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   1%|▏         | 1/68 [03:27<1:54:11, 102.26s/q, acc=50.0%, time=105.6s, type=unknown] Q&A Progress:   3%|▎         | 2/68 [03:27<1:54:37, 104.20s/q, acc=50.0%, time=105.6s, type=unknown]16:40:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:40:50 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   3%|▎         | 2/68 [03:44<1:54:37, 104.20s/q, acc=66.7%, time=16.9s, type=unknown] Q&A Progress:   4%|▍         | 3/68 [03:44<1:09:40, 64.32s/q, acc=66.7%, time=16.9s, type=unknown] 16:40:50 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:41:07 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   4%|▍         | 3/68 [04:01<1:09:40, 64.32s/q, acc=75.0%, time=16.8s, type=unknown]Q&A Progress:   6%|▌         | 4/68 [04:01<48:35, 45.56s/q, acc=75.0%, time=16.8s, type=unknown]  16:41:07 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:41:20 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   6%|▌         | 4/68 [04:14<48:35, 45.56s/q, acc=60.0%, time=13.3s, type=unknown]16:41:20 | INFO | Checkpoint saved: stage=qa_evaluation, processed=5 questions
+Q&A Progress:   7%|▋         | 5/68 [04:14<35:37, 33.93s/q, acc=60.0%, time=13.3s, type=unknown]16:41:20 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:41:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   7%|▋         | 5/68 [04:28<35:37, 33.93s/q, acc=50.0%, time=13.3s, type=unknown]Q&A Progress:   9%|▉         | 6/68 [04:28<27:49, 26.92s/q, acc=50.0%, time=13.3s, type=unknown]16:41:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:43:03 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   9%|▉         | 6/68 [05:57<27:49, 26.92s/q, acc=42.9%, time=89.3s, type=unknown]Q&A Progress:  10%|█         | 7/68 [05:57<48:05, 47.30s/q, acc=42.9%, time=89.3s, type=unknown]16:43:03 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:44:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:  10%|█         | 7/68 [07:34<48:05, 47.30s/q, acc=50.0%, time=97.5s, type=unknown]Q&A Progress:  12%|█▏        | 8/68 [07:34<1:03:16, 63.27s/q, acc=50.0%, time=97.5s, type=unknown]16:44:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:44:52 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:  12%|█▏        | 8/68 [07:46<1:03:16, 63.27s/q, acc=44.4%, time=11.9s, type=unknown]Q&A Progress:  13%|█▎        | 9/68 [07:46<46:26, 47.23s/q, acc=44.4%, time=11.9s, type=unknown]  16:44:52 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:46:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:  13%|█▎        | 9/68 [09:27<46:26, 47.23s/q, acc=40.0%, time=100.7s, type=unknown]16:46:33 | INFO | Checkpoint saved: stage=qa_evaluation, processed=10 questions
+Q&A Progress:  15%|█▍        | 10/68 [09:27<1:01:36, 63.73s/q, acc=40.0%, time=100.7s, type=unknown]16:46:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+16:48:37 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:  15%|█▍        | 10/68 [11:31<1:01:36, 63.73s/q, acc=36.4%, time=123.9s, type=unknown]Q&A Progress:  16%|█▌        | 11/68 [11:31<1:18:01, 82.14s/q, acc=36.4%, time=123.9s, type=unknown]16:48:37 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

@@ -50,3 +50,19 @@ git add . && git commit -m "description" && git push
 # Pull latest code on Mini
 git pull
 ```
+
+
+
+
+# 杀掉旧进程
+pkill -f test_pipeline.py
+
+# 拉取更新
+git pull
+
+# 清除旧 checkpoint（从头开始）
+rm -f cuad_dataset/results/checkpoint.json
+
+# 重新运行
+nohup python cuad_dataset/test_pipeline.py > cuad_dataset/results/pipeline.log 2>&1 &
+tail -f cuad_dataset/results/pipeline.log

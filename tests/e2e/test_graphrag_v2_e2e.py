@@ -67,7 +67,7 @@ def test_graphrag_v2_happy_path(
     expected_messages = [
         {
             "role": "system",
-            "content": "You are a precise question-answering assistant. Return only valid JSON.",
+            "content": "Answer the user question using the provided context. Return your answer as JSON.",
         },
         {
             "role": "user",
@@ -165,7 +165,7 @@ assistant: answer to initial question
     second_invocation_messages = [
         {
             "role": "system",
-            "content": "You are a precise question-answering assistant. Return only valid JSON.",
+            "content": "Answer the user question using the provided context. Return your answer as JSON.",
         },
         {
             "role": "user",
@@ -247,7 +247,7 @@ def test_graphrag_v2_happy_path_return_context(
     expected_messages = [
         {
             "role": "system",
-            "content": "You are a precise question-answering assistant. Return only valid JSON.",
+            "content": "Answer the user question using the provided context. Return your answer as JSON.",
         },
         {
             "role": "user",
@@ -310,7 +310,7 @@ def test_graphrag_v2_happy_path_examples(
     expected_messages = [
         {
             "role": "system",
-            "content": "You are a precise question-answering assistant. Return only valid JSON.",
+            "content": "Answer the user question using the provided context. Return your answer as JSON.",
         },
         {
             "role": "user",

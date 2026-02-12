@@ -41,14 +41,8 @@ Examples:
 Question:
 user's query
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -82,19 +76,13 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """,
         message_history=None,
-        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+        system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
     )
 
     assert isinstance(res, RagResultModel)
@@ -150,14 +138,8 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -175,7 +157,7 @@ JSON:
             call(
                 input=second_invocation,
                 message_history=message_history,
-                system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+                system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
             ),
         ]
     )
@@ -235,14 +217,8 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -260,7 +236,7 @@ JSON:
             call(
                 input=second_invocation,
                 message_history=message_history.messages,
-                system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
+                system_instruction="Answer the user question using the provided context. Return your answer as JSON.",
             ),
         ]
     )

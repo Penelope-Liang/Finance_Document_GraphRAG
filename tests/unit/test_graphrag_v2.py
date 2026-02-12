@@ -46,14 +46,8 @@ Examples:
 Question:
 user's query
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -80,7 +74,7 @@ def test_graphrag_happy_path(retriever_mock: MagicMock, llm_v2: MagicMock) -> No
         input=[
             {
                 "role": "system",
-                "content": "You are a precise question-answering assistant. Return only valid JSON.",
+                "content": "Answer the user question using the provided context. Return your answer as JSON.",
             },
             {
                 "role": "user",
@@ -94,14 +88,8 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """,
@@ -162,14 +150,8 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -195,7 +177,7 @@ JSON:
                 input=[
                     {
                         "role": "system",
-                        "content": "You are a precise question-answering assistant. Return only valid JSON.",
+                        "content": "Answer the user question using the provided context. Return your answer as JSON.",
                     },
                     {"role": "user", "content": "initial question"},
                     {"role": "assistant", "content": "answer to initial question"},
@@ -260,14 +242,8 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied verbatim from the Context. (One word, phrase, number, or date—nothing more.)
-- evidence MUST be the single sentence from Context that contains the answer.
-- If the answer is not in the Context, return {"final_answer": "", "evidence": ""}.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -293,7 +269,7 @@ JSON:
                 input=[
                     {
                         "role": "system",
-                        "content": "You are a precise question-answering assistant. Return only valid JSON.",
+                        "content": "Answer the user question using the provided context. Return your answer as JSON.",
                     },
                     {"role": "user", "content": "initial question"},
                     {"role": "assistant", "content": "answer to initial question"},
