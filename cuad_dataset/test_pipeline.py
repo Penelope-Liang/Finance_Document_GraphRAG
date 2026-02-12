@@ -17,16 +17,27 @@ Environment variables required:
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
 import warnings
+from datetime import datetime
 from pathlib import Path
 
 # Suppress deprecation warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import neo4j
+from tqdm import tqdm
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
@@ -55,10 +66,14 @@ EMBEDDING_DIMENSION = 1024  # bge-m3 dimension
 SCRIPT_DIR = Path(__file__).parent
 DATA_PATH = SCRIPT_DIR / "data" / "train_separate_questions.json"
 OUTPUT_DIR = SCRIPT_DIR / "results"
+CHECKPOINT_FILE = OUTPUT_DIR / "checkpoint.json"
 
 # LLM settings
 LLM_MODEL = "qwen2.5:72b"
 EMBEDDER_MODEL = "bge-m3:latest"
+
+# Checkpoint settings
+CHECKPOINT_INTERVAL = 5  # Save checkpoint every N questions
 
 
 def require_env(name: str) -> str:
@@ -72,7 +87,7 @@ def require_env(name: str) -> str:
 
 def load_first_contract():
     """Load the first contract from CUAD dataset."""
-    print(f"Loading data from {DATA_PATH}...")
+    logger.info(f"Loading data from {DATA_PATH}...")
     with open(DATA_PATH, "r") as f:
         data = json.load(f)
     
@@ -82,46 +97,81 @@ def load_first_contract():
     context = paragraph["context"]
     qas = paragraph["qas"]
     
-    print(f"Contract: {title}")
-    print(f"Context length: {len(context)} characters")
-    print(f"Questions: {len(qas)}")
+    logger.info(f"Contract: {title}")
+    logger.info(f"Context length: {len(context):,} characters")
+    logger.info(f"Questions: {len(qas)}")
     
     return title, context, qas
 
 
+def save_checkpoint(results: list, start_idx: int, stage: str):
+    """Save checkpoint to resume later."""
+    checkpoint = {
+        "stage": stage,
+        "start_idx": start_idx,
+        "results": results,
+        "timestamp": datetime.now().isoformat(),
+    }
+    with open(CHECKPOINT_FILE, "w") as f:
+        json.dump(checkpoint, f, indent=2)
+    logger.info(f"Checkpoint saved: stage={stage}, processed={len(results)} questions")
+
+
+def load_checkpoint():
+    """Load checkpoint if exists."""
+    if CHECKPOINT_FILE.exists():
+        with open(CHECKPOINT_FILE, "r") as f:
+            checkpoint = json.load(f)
+        logger.info(f"Found checkpoint: stage={checkpoint['stage']}, processed={len(checkpoint['results'])} questions")
+        return checkpoint
+    return None
+
+
 async def build_knowledge_graph(driver, llm, embedder, context: str, title: str):
     """Build knowledge graph from contract text using SimpleKGPipeline."""
-    print("\n" + "=" * 50)
-    print("Step 1: Building Knowledge Graph")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("Step 1: Building Knowledge Graph")
+    logger.info("=" * 50)
     
-    # Create pipeline without schema (LLM will auto-extract entities/relations)
+    # Create pipeline with schema="FREE" to skip auto-extraction
+    # This avoids SchemaExtractionError when LLM returns invalid JSON
+    logger.info("Creating SimpleKGPipeline with schema='FREE'...")
     kg_builder = SimpleKGPipeline(
         llm=llm,
         driver=driver,
         embedder=embedder,
-        # No schema - let LLM extract freely
+        schema="FREE",  # Skip auto schema extraction, let LLM extract freely
         from_pdf=False,
         neo4j_database=NEO4J_DATABASE,
     )
+    logger.info("SimpleKGPipeline created successfully")
     
-    print("Running KG builder pipeline...")
+    logger.info(f"Running KG builder on {len(context):,} chars of text...")
     start_time = time.time()
     
-    result = await kg_builder.run_async(text=context)
-    
-    elapsed = time.time() - start_time
-    print(f"KG built in {elapsed:.1f} seconds")
-    print(f"Pipeline result: {result}")
-    
-    return result
+    try:
+        result = await kg_builder.run_async(text=context)
+        elapsed = time.time() - start_time
+        logger.info(f"KG built successfully in {elapsed:.1f} seconds")
+        logger.info(f"Pipeline result: {result}")
+        
+        # Verify nodes were created
+        with driver.session(database=NEO4J_DATABASE) as session:
+            node_count = session.run("MATCH (n) RETURN count(n) AS cnt").single()["cnt"]
+            chunk_count = session.run("MATCH (n:Chunk) RETURN count(n) AS cnt").single()["cnt"]
+            logger.info(f"Database now has {node_count} nodes, {chunk_count} Chunk nodes")
+        
+        return result
+    except Exception as e:
+        logger.error(f"KG build failed after {time.time() - start_time:.1f}s: {e}")
+        raise
 
 
 def create_chunk_vector_index(driver, embedder):
     """Create vector index on Chunk nodes for retrieval."""
-    print("\n" + "=" * 50)
-    print("Step 2: Creating Vector Index")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("Step 2: Creating Vector Index")
+    logger.info("=" * 50)
     
     try:
         create_vector_index(
@@ -132,19 +182,31 @@ def create_chunk_vector_index(driver, embedder):
             dimensions=EMBEDDING_DIMENSION,
             similarity_fn="cosine",
         )
-        print(f"Created vector index: {VECTOR_INDEX_NAME}")
+        logger.info(f"Created vector index: {VECTOR_INDEX_NAME}")
     except Exception as e:
         if "already exists" in str(e).lower() or "equivalent" in str(e).lower():
-            print(f"Vector index {VECTOR_INDEX_NAME} already exists, skipping...")
+            logger.info(f"Vector index {VECTOR_INDEX_NAME} already exists, skipping...")
         else:
+            logger.error(f"Failed to create vector index: {e}")
             raise
+    
+    # Wait and verify index is ready
+    logger.info("Waiting for index to populate...")
+    time.sleep(3)
+    with driver.session(database=NEO4J_DATABASE) as session:
+        result = session.run(
+            "SHOW INDEXES WHERE name = $name",
+            name=VECTOR_INDEX_NAME
+        ).single()
+        if result:
+            logger.info(f"Index status: {result.get('state', 'unknown')}")
 
 
 def setup_graphrag(driver, llm, embedder):
     """Set up GraphRAG with VectorCypherRetriever."""
-    print("\n" + "=" * 50)
-    print("Step 3: Setting up GraphRAG")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("Step 3: Setting up GraphRAG")
+    logger.info("=" * 50)
     
     # Retrieval query: get chunk text and related entities
     RETRIEVAL_QUERY = """
@@ -159,6 +221,7 @@ def setup_graphrag(driver, llm, embedder):
            entities
     """
     
+    logger.info("Creating VectorCypherRetriever...")
     retriever = VectorCypherRetriever(
         driver=driver,
         index_name=VECTOR_INDEX_NAME,
@@ -167,8 +230,17 @@ def setup_graphrag(driver, llm, embedder):
         neo4j_database=NEO4J_DATABASE,
     )
     
+    logger.info("Creating GraphRAG...")
     rag = GraphRAG(retriever=retriever, llm=llm)
-    print("GraphRAG initialized")
+    logger.info("GraphRAG initialized successfully")
+    
+    # Test retrieval with a simple query
+    logger.info("Testing retrieval...")
+    try:
+        test_result = retriever.search(query_text="agreement", top_k=1)
+        logger.info(f"Retrieval test: found {len(test_result.items)} items")
+    except Exception as e:
+        logger.warning(f"Retrieval test failed: {e}")
     
     return rag
 
@@ -193,18 +265,29 @@ def parse_llm_response(response: str) -> tuple:
         return response.strip(), ""
 
 
-def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5):
+def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5, start_idx: int = 0, existing_results: list = None):
     """Run Q&A on all questions and evaluate results."""
-    print("\n" + "=" * 50)
-    print("Step 4: Running Q&A Evaluation")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("Step 4: Running Q&A Evaluation")
+    logger.info("=" * 50)
     
-    results = []
+    results = existing_results if existing_results else []
     total = len(qas)
+    correct_count = sum(1 for r in results if r.get("is_correct", False))
     
-    for i, qa in enumerate(qas, 1):
+    if start_idx > 0:
+        logger.info(f"Resuming from question {start_idx + 1}, already processed {len(results)} questions")
+    
+    # Use tqdm for progress bar
+    pbar = tqdm(enumerate(qas[start_idx:], start_idx + 1), 
+                total=total, 
+                initial=start_idx,
+                desc="Q&A Progress",
+                unit="q")
+    
+    for i, qa in pbar:
         question = qa["question"]
-        print(f"\n[{i}/{total}] {question[:80]}...")
+        q_type = qa["id"].split("/")[-1] if "/" in qa["id"] else "unknown"
         
         start_time = time.time()
         try:
@@ -229,14 +312,24 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5):
             )
             results.append(eval_result)
             
-            # Print result
+            # Update stats
+            if eval_result["is_correct"]:
+                correct_count += 1
+            
+            # Update progress bar
+            accuracy = correct_count / len(results) * 100
+            pbar.set_postfix({
+                "acc": f"{accuracy:.1f}%",
+                "time": f"{elapsed:.1f}s",
+                "type": q_type[:15]
+            })
+            
+            # Log every question
             status = "✓" if eval_result["is_correct"] else "✗"
-            print(f"  {status} Answer: {llm_answer[:60]}..." if len(llm_answer) > 60 else f"  {status} Answer: {llm_answer}")
-            print(f"  Gold: {eval_result['gold_answers'][:2]}")
-            print(f"  Jaccard: {eval_result['jaccard_score']:.3f}, Time: {elapsed:.1f}s")
+            logger.debug(f"[{i}/{total}] {status} J={eval_result['jaccard_score']:.2f} | {question[:50]}...")
             
         except Exception as e:
-            print(f"  Error: {e}")
+            logger.error(f"[{i}/{total}] Error: {e}")
             # Record error as incorrect
             eval_result = evaluate_single_question(
                 qa=qa,
@@ -245,23 +338,40 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5):
                 llm_evidence="",
             )
             results.append(eval_result)
+        
+        # Save checkpoint periodically
+        if i % CHECKPOINT_INTERVAL == 0:
+            save_checkpoint(results, i, "qa_evaluation")
+    
+    pbar.close()
+    
+    # Final stats
+    logger.info(f"Q&A complete: {len(results)} questions, {correct_count} correct ({correct_count/len(results)*100:.1f}%)")
     
     return results
 
 
 def clear_database(driver):
     """Clear all nodes and relationships from the database."""
-    print("Clearing existing data from Neo4j...")
+    logger.info("Clearing existing data from Neo4j...")
     with driver.session(database=NEO4J_DATABASE) as session:
-        session.run("MATCH (n) DETACH DELETE n")
-    print("Database cleared")
+        # Count before
+        count_before = session.run("MATCH (n) RETURN count(n) AS cnt").single()["cnt"]
+        logger.info(f"Found {count_before} existing nodes")
+        
+        if count_before > 0:
+            session.run("MATCH (n) DETACH DELETE n")
+            logger.info("Database cleared")
+        else:
+            logger.info("Database already empty")
 
 
 async def main():
     """Main pipeline execution."""
-    print("=" * 60)
-    print("CUAD GraphRAG Test Pipeline")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("CUAD GraphRAG Test Pipeline")
+    logger.info(f"Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
     
     # Check environment
     password = require_env("NEO4J_PASSWORD")
@@ -269,60 +379,98 @@ async def main():
     # Create output directory
     OUTPUT_DIR.mkdir(exist_ok=True)
     
+    # Check for existing checkpoint
+    checkpoint = load_checkpoint()
+    start_idx = 0
+    existing_results = None
+    skip_kg_build = False
+    
+    if checkpoint and checkpoint.get("stage") == "qa_evaluation":
+        logger.info("Found Q&A checkpoint, will resume from there")
+        start_idx = checkpoint["start_idx"]
+        existing_results = checkpoint["results"]
+        skip_kg_build = True  # KG already built
+    
     # Initialize components
-    print("\nInitializing LLM and Embedder...")
+    logger.info("Initializing LLM and Embedder...")
     llm = OllamaLLM(
         model_name=LLM_MODEL,
         model_params={"options": {"temperature": 0}},
     )
     embedder = OllamaEmbeddings(model=EMBEDDER_MODEL)
-    print(f"LLM: {LLM_MODEL}")
-    print(f"Embedder: {EMBEDDER_MODEL}")
+    logger.info(f"LLM: {LLM_MODEL}")
+    logger.info(f"Embedder: {EMBEDDER_MODEL}")
+    
+    # Test LLM connection
+    logger.info("Testing LLM connection...")
+    try:
+        test_response = llm.invoke("Say 'OK' if you're working.")
+        logger.info(f"LLM test response: {test_response.content[:50]}...")
+    except Exception as e:
+        logger.error(f"LLM connection failed: {e}")
+        sys.exit(1)
     
     # Load data
     title, context, qas = load_first_contract()
     
     # Connect to Neo4j and run pipeline
+    logger.info(f"Connecting to Neo4j: {NEO4J_URI}")
     with neo4j.GraphDatabase.driver(NEO4J_URI, auth=("neo4j", password)) as driver:
         # Verify connection
-        driver.verify_connectivity()
-        print(f"\nConnected to Neo4j: {NEO4J_URI}")
+        try:
+            driver.verify_connectivity()
+            logger.info("Neo4j connection verified")
+        except Exception as e:
+            logger.error(f"Neo4j connection failed: {e}")
+            sys.exit(1)
         
-        # Clear existing data
-        clear_database(driver)
-        
-        # Step 1: Build KG
-        await build_knowledge_graph(driver, llm, embedder, context, title)
-        
-        # Step 2: Create vector index
-        create_chunk_vector_index(driver, embedder)
-        
-        # Wait a bit for index to be ready
-        print("Waiting for index to be ready...")
-        time.sleep(5)
+        if not skip_kg_build:
+            # Clear existing data
+            clear_database(driver)
+            
+            # Step 1: Build KG
+            save_checkpoint([], 0, "kg_build_start")
+            await build_knowledge_graph(driver, llm, embedder, context, title)
+            save_checkpoint([], 0, "kg_build_complete")
+            
+            # Step 2: Create vector index
+            create_chunk_vector_index(driver, embedder)
+            save_checkpoint([], 0, "index_created")
+            
+            # Wait a bit for index to be ready
+            logger.info("Waiting 5s for index to be ready...")
+            time.sleep(5)
+        else:
+            logger.info("Skipping KG build (resuming from checkpoint)")
         
         # Step 3: Setup GraphRAG
         rag = setup_graphrag(driver, llm, embedder)
         
         # Step 4: Run Q&A and evaluate
-        results = run_qa_evaluation(rag, qas, context)
+        results = run_qa_evaluation(rag, qas, context, start_idx=start_idx, existing_results=existing_results)
     
     # Step 5: Save results
-    print("\n" + "=" * 50)
-    print("Step 5: Saving Results")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("Step 5: Saving Results")
+    logger.info("=" * 50)
     
     summary = save_rag_results(results, str(OUTPUT_DIR))
     
-    # Print summary
-    print("\n" + "=" * 50)
-    print("Summary")
-    print("=" * 50)
-    print(f"Total questions: {summary['total_questions']}")
-    print(f"Correct (Jaccard >= 0.5): {summary['correct_count']} ({summary['accuracy']*100:.1f}%)")
-    print(f"Exact match: {summary['exact_match_count']} ({summary['exact_match_rate']*100:.1f}%)")
+    # Delete checkpoint file after successful completion
+    if CHECKPOINT_FILE.exists():
+        CHECKPOINT_FILE.unlink()
+        logger.info("Checkpoint file removed (pipeline complete)")
     
-    print("\nDone!")
+    # Print summary
+    logger.info("=" * 50)
+    logger.info("SUMMARY")
+    logger.info("=" * 50)
+    logger.info(f"Total questions: {summary['total_questions']}")
+    logger.info(f"Correct (Jaccard >= 0.5): {summary['correct_count']} ({summary['accuracy']*100:.1f}%)")
+    logger.info(f"Exact match: {summary['exact_match_count']} ({summary['exact_match_rate']*100:.1f}%)")
+    logger.info(f"Finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    logger.info("Done!")
 
 
 if __name__ == "__main__":

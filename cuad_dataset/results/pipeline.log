@@ -1,0 +1,112 @@
+12:42:28 | INFO | ============================================================
+12:42:28 | INFO | CUAD GraphRAG Test Pipeline
+12:42:28 | INFO | Started at 2026-02-12 12:42:28
+12:42:28 | INFO | ============================================================
+12:42:28 | INFO | Initializing LLM and Embedder...
+12:42:28 | INFO | LLM: qwen2.5:72b
+12:42:28 | INFO | Embedder: bge-m3:latest
+12:42:28 | INFO | Testing LLM connection...
+12:42:30 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+12:42:30 | INFO | LLM test response: OK...
+12:42:30 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
+12:42:31 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
+12:42:31 | INFO | Context length: 54,290 characters
+12:42:31 | INFO | Questions: 68
+12:42:31 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
+12:42:37 | INFO | Neo4j connection verified
+12:42:37 | INFO | Clearing existing data from Neo4j...
+12:42:37 | INFO | Found 0 existing nodes
+12:42:37 | INFO | Database already empty
+12:42:37 | INFO | Checkpoint saved: stage=kg_build_start, processed=0 questions
+12:42:37 | INFO | ==================================================
+12:42:37 | INFO | Step 1: Building Knowledge Graph
+12:42:37 | INFO | ==================================================
+12:42:37 | INFO | Creating SimpleKGPipeline...
+12:42:37 | INFO | SimpleKGPipeline created successfully
+12:42:37 | INFO | Running KG builder on 54,290 chars of text...
+12:42:37 | INFO | PIPELINE_RUNNER: starting pipeline <neo4j_graphrag.kg_builder.pipeline.pipeline.Pipeline object at 0x11b734810> with run_params={'splitter': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'schema': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'extractor': {'document_info': {'path': 'document.txt', 'metadata': None, 'document_type': 'inline_text'}}}
+12:42:38 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:38 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+12:47:14 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+12:47:14 | ERROR | KG build failed after 276.7s: LLM response is not valid JSON.
+Traceback (most recent call last):
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/components/schema.py", line 789, in run
+    extracted_schema: Dict[str, Any] = json.loads(content)
+                                       ^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 476, in <module>
+    if __name__ == "__main__":
+        ^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 432, in main
+    save_checkpoint([], 0, "kg_build_start")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 152, in build_knowledge_graph
+    try:
+         
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/kg_builder.py", line 164, in run_async
+    return await self.runner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/config/runner.py", line 135, in run
+    result = await self.pipeline.run(data=run_param)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 568, in run
+    raise e
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 562, in run
+    res = await self._run(run_id, data)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 580, in _run
+    await orchestrator.run(data)
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/orchestrator.py", line 268, in run
+    await asyncio.gather(*tasks)
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/orchestrator.py", line 88, in run_task
+    res = await task.run(context, inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 104, in run
+    res = await self.execute(context, inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 90, in execute
+    component_result = await self.component.run_with_context(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/component.py", line 110, in run_with_context
+    return await self.run(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/site-packages/pydantic/_internal/_validate_call.py", line 34, in wrapper_function
+    return await wrapper(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/components/schema.py", line 813, in run
+    raise SchemaExtractionError("LLM response is not valid JSON.") from exc
+neo4j_graphrag.exceptions.SchemaExtractionError: LLM response is not valid JSON.

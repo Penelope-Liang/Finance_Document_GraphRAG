@@ -70,10 +70,21 @@ Examples:
 Question:
 biology
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         message_history=None,
-        system_instruction="Answer the user question using the provided context.",
+        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
     )
     assert isinstance(result, RagResultModel)
     assert result.answer == "some text"
@@ -139,7 +150,18 @@ Examples:
 Question:
 question
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """
     retriever_mock.search.assert_called_once_with(
         query_text=expected_retriever_query_text
@@ -154,7 +176,7 @@ Answer:
             call(
                 input=second_invocation,
                 message_history=message_history.messages,
-                system_instruction="Answer the user question using the provided context.",
+                system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
             ),
         ]
     )
@@ -200,10 +222,21 @@ Examples:
 Question:
 biology
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         message_history=None,
-        system_instruction="Answer the user question using the provided context.",
+        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
     )
     assert isinstance(result, RagResultModel)
     assert result.answer == "some text"
@@ -246,10 +279,21 @@ this is my example
 Question:
 biology
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         message_history=None,
-        system_instruction="Answer the user question using the provided context.",
+        system_instruction="You are a precise question-answering assistant. Return only valid JSON.",
     )
     assert result.answer == "some text"
 

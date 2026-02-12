@@ -67,7 +67,7 @@ def test_graphrag_v2_happy_path(
     expected_messages = [
         {
             "role": "system",
-            "content": "Answer the user question using the provided context.",
+            "content": "You are a precise question-answering assistant. Return only valid JSON.",
         },
         {
             "role": "user",
@@ -81,7 +81,18 @@ Examples:
 Question:
 biology
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         },
     ]
@@ -154,7 +165,7 @@ assistant: answer to initial question
     second_invocation_messages = [
         {
             "role": "system",
-            "content": "Answer the user question using the provided context.",
+            "content": "You are a precise question-answering assistant. Return only valid JSON.",
         },
         {
             "role": "user",
@@ -176,7 +187,18 @@ Examples:
 Question:
 question
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         },
     ]
@@ -225,7 +247,7 @@ def test_graphrag_v2_happy_path_return_context(
     expected_messages = [
         {
             "role": "system",
-            "content": "Answer the user question using the provided context.",
+            "content": "You are a precise question-answering assistant. Return only valid JSON.",
         },
         {
             "role": "user",
@@ -239,7 +261,18 @@ Examples:
 Question:
 biology
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         },
     ]
@@ -277,7 +310,7 @@ def test_graphrag_v2_happy_path_examples(
     expected_messages = [
         {
             "role": "system",
-            "content": "Answer the user question using the provided context.",
+            "content": "You are a precise question-answering assistant. Return only valid JSON.",
         },
         {
             "role": "user",
@@ -291,7 +324,18 @@ this is my example
 Question:
 biology
 
-Answer:
+Return ONLY valid JSON:
+{"final_answer": "string", "evidence": "string"}
+
+Rules:
+- Use ONLY the Context.
+- final_answer MUST be the shortest exact span copied from the Context that answers the question.
+- Do NOT add any extra words, units, or explanation in final_answer.
+- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
+- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
+- JSON only. No markdown. No additional keys.
+
+JSON:
 """,
         },
     ]
