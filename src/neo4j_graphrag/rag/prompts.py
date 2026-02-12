@@ -121,7 +121,7 @@ class CUADRagTemplate(RagTemplate):
     copied verbatim from the context. Evaluation is based on overlap between
     the extracted answer and gold annotations.
     """
-    DEFAULT_SYSTEM_INSTRUCTIONS = "Extract the exact text span from the context that answers the question. Return JSON only."
+    DEFAULT_SYSTEM_INSTRUCTIONS = "Extract the exact text span from the context that answers the question. Return plain JSON only, no markdown."
     DEFAULT_TEMPLATE = """Context:
 {context}
 
@@ -132,11 +132,9 @@ Instructions:
 - Find the exact text span in the Context that answers the question.
 - Copy that span VERBATIM as final_answer. Do not paraphrase, summarize, or add any words.
 - If no answer exists in the Context, set final_answer to empty string "".
+- Return ONLY the JSON object below. Do NOT wrap it in ```json``` or any markdown.
 
-Return JSON:
 {{"final_answer": ""}}
-
-JSON:
 """
     EXPECTED_INPUTS = ["context", "query_text"]
 

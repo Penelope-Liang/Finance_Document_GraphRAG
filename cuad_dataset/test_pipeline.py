@@ -262,9 +262,20 @@ def parse_llm_response(response: str) -> tuple:
         "evidence": "..."
     }
     """
+    # Strip markdown code blocks if present
+    text = response.strip()
+    if text.startswith("```"):
+        # Remove ```json or ``` at start
+        lines = text.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    
     try:
         # Try to parse as JSON
-        data = json.loads(response)
+        data = json.loads(text)
         answer = data.get("final_answer", "")
         evidence = data.get("evidence", "")
         return answer, evidence
