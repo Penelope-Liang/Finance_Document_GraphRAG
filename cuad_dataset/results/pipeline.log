@@ -1,58 +1,42 @@
-16:36:33 | INFO | ============================================================
-16:36:33 | INFO | CUAD GraphRAG Test Pipeline
-16:36:33 | INFO | Started at 2026-02-12 16:36:33
-16:36:33 | INFO | ============================================================
-16:36:33 | INFO | Found checkpoint: stage=index_created, processed=0 questions
-16:36:33 | INFO | Found checkpoint at stage 'index_created', skipping KG build
-16:36:33 | INFO | Initializing LLM and Embedder...
-16:36:33 | INFO | LLM: qwen2.5:72b
-16:36:33 | INFO | Embedder: bge-m3:latest
-16:36:33 | INFO | Testing LLM connection...
-16:36:56 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-16:36:56 | INFO | LLM test response: OK...
-16:36:56 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
-16:36:56 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
-16:36:56 | INFO | Context length: 54,290 characters
-16:36:56 | INFO | Questions: 68
-16:36:56 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
-16:37:03 | INFO | Neo4j connection verified
-16:37:03 | INFO | Skipping KG build (resuming from checkpoint)
-16:37:03 | INFO | ==================================================
-16:37:03 | INFO | Step 3: Setting up GraphRAG
-16:37:03 | INFO | ==================================================
-16:37:03 | INFO | Creating VectorCypherRetriever...
-16:37:03 | INFO | Creating GraphRAG...
-16:37:03 | INFO | GraphRAG initialized successfully
-16:37:03 | INFO | Testing retrieval...
-16:37:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:37:05 | INFO | Retrieval test: found 1 items
-16:37:05 | INFO | ==================================================
-16:37:05 | INFO | Step 4: Running Q&A Evaluation
-16:37:05 | INFO | ==================================================
-Q&A Progress:   0%|          | 0/68 [00:00<?, ?q/s]16:37:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:38:47 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   0%|          | 0/68 [01:42<?, ?q/s, acc=100.0%, time=102.3s, type=unknown]Q&A Progress:   1%|▏         | 1/68 [01:42<1:54:11, 102.26s/q, acc=100.0%, time=102.3s, type=unknown]16:38:48 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:40:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   1%|▏         | 1/68 [03:27<1:54:11, 102.26s/q, acc=50.0%, time=105.6s, type=unknown] Q&A Progress:   3%|▎         | 2/68 [03:27<1:54:37, 104.20s/q, acc=50.0%, time=105.6s, type=unknown]16:40:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:40:50 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   3%|▎         | 2/68 [03:44<1:54:37, 104.20s/q, acc=66.7%, time=16.9s, type=unknown] Q&A Progress:   4%|▍         | 3/68 [03:44<1:09:40, 64.32s/q, acc=66.7%, time=16.9s, type=unknown] 16:40:50 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:41:07 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   4%|▍         | 3/68 [04:01<1:09:40, 64.32s/q, acc=75.0%, time=16.8s, type=unknown]Q&A Progress:   6%|▌         | 4/68 [04:01<48:35, 45.56s/q, acc=75.0%, time=16.8s, type=unknown]  16:41:07 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:41:20 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   6%|▌         | 4/68 [04:14<48:35, 45.56s/q, acc=60.0%, time=13.3s, type=unknown]16:41:20 | INFO | Checkpoint saved: stage=qa_evaluation, processed=5 questions
-Q&A Progress:   7%|▋         | 5/68 [04:14<35:37, 33.93s/q, acc=60.0%, time=13.3s, type=unknown]16:41:20 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:41:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   7%|▋         | 5/68 [04:28<35:37, 33.93s/q, acc=50.0%, time=13.3s, type=unknown]Q&A Progress:   9%|▉         | 6/68 [04:28<27:49, 26.92s/q, acc=50.0%, time=13.3s, type=unknown]16:41:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:43:03 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:   9%|▉         | 6/68 [05:57<27:49, 26.92s/q, acc=42.9%, time=89.3s, type=unknown]Q&A Progress:  10%|█         | 7/68 [05:57<48:05, 47.30s/q, acc=42.9%, time=89.3s, type=unknown]16:43:03 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:44:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:  10%|█         | 7/68 [07:34<48:05, 47.30s/q, acc=50.0%, time=97.5s, type=unknown]Q&A Progress:  12%|█▏        | 8/68 [07:34<1:03:16, 63.27s/q, acc=50.0%, time=97.5s, type=unknown]16:44:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:44:52 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:  12%|█▏        | 8/68 [07:46<1:03:16, 63.27s/q, acc=44.4%, time=11.9s, type=unknown]Q&A Progress:  13%|█▎        | 9/68 [07:46<46:26, 47.23s/q, acc=44.4%, time=11.9s, type=unknown]  16:44:52 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:46:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:  13%|█▎        | 9/68 [09:27<46:26, 47.23s/q, acc=40.0%, time=100.7s, type=unknown]16:46:33 | INFO | Checkpoint saved: stage=qa_evaluation, processed=10 questions
-Q&A Progress:  15%|█▍        | 10/68 [09:27<1:01:36, 63.73s/q, acc=40.0%, time=100.7s, type=unknown]16:46:33 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-16:48:37 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-Q&A Progress:  15%|█▍        | 10/68 [11:31<1:01:36, 63.73s/q, acc=36.4%, time=123.9s, type=unknown]Q&A Progress:  16%|█▌        | 11/68 [11:31<1:18:01, 82.14s/q, acc=36.4%, time=123.9s, type=unknown]16:48:37 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
-  warnings.warn('resource_tracker: There appear to be %d '
+17:12:10 | INFO | ============================================================
+17:12:10 | INFO | CUAD GraphRAG Test Pipeline
+17:12:10 | INFO | Started at 2026-02-12 17:12:10
+17:12:10 | INFO | ============================================================
+17:12:10 | INFO | Initializing LLM and Embedder...
+17:12:10 | INFO | LLM: qwen2.5:72b
+17:12:10 | INFO | Embedder: bge-m3:latest
+17:12:10 | INFO | Testing LLM connection...
+17:12:14 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+17:12:14 | INFO | LLM test response: OK...
+17:12:14 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
+17:12:14 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
+17:12:14 | INFO | Context length: 54,290 characters
+17:12:14 | INFO | Questions: 68
+17:12:14 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
+17:12:21 | INFO | Neo4j connection verified
+17:12:21 | INFO | Clearing existing data from Neo4j...
+17:12:21 | INFO | Found 115 existing nodes
+17:12:21 | INFO | Database cleared
+17:12:21 | INFO | Checkpoint saved: stage=kg_build_start, processed=0 questions
+17:12:21 | INFO | ==================================================
+17:12:21 | INFO | Step 1: Building Knowledge Graph
+17:12:21 | INFO | ==================================================
+17:12:21 | INFO | Creating SimpleKGPipeline with schema='FREE'...
+17:12:21 | INFO | SimpleKGPipeline created successfully
+17:12:21 | INFO | Running KG builder on 54,290 chars of text...
+17:12:21 | INFO | PIPELINE_RUNNER: starting pipeline <neo4j_graphrag.kg_builder.pipeline.pipeline.Pipeline object at 0x152740550> with run_params={'schema': {'node_types': (), 'relationship_types': (), 'patterns': (), 'constraints': (), 'additional_node_types': True, 'additional_relationship_types': True, 'additional_patterns': True}, 'splitter': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'extractor': {'document_info': {'path': 'document.txt', 'metadata': None, 'document_type': 'inline_text'}}}
+17:12:22 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:22 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"

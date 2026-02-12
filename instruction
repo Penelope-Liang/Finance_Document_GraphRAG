@@ -66,3 +66,18 @@ rm -f cuad_dataset/results/checkpoint.json
 # 重新运行
 nohup python cuad_dataset/test_pipeline.py > cuad_dataset/results/pipeline.log 2>&1 &
 tail -f cuad_dataset/results/pipeline.log
+
+
+
+# 1. 拉取最新代码（覆盖本地修改）
+git reset --hard origin/main
+
+# 2. 清除旧的checkpoint和结果
+rm -f cuad_dataset/results/checkpoint.json
+rm -f cuad_dataset/results/live_results.jsonl
+
+# 3. 后台运行pipeline
+nohup python cuad_dataset/test_pipeline.py > cuad_dataset/results/pipeline.log 2>&1 &
+
+# 4. 实时查看结果
+tail -f cuad_dataset/results/live_results.jsonl

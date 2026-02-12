@@ -114,6 +114,36 @@ JSON:
         return super().format(query_text=query_text, context=context, examples=examples)
 
 
+class CUADRagTemplate(PromptTemplate):
+    """Prompt template for CUAD (Contract Understanding Atticus Dataset) evaluation.
+    
+    CUAD requires extractive answers - the answer must be an exact text span 
+    copied verbatim from the context. Evaluation is based on overlap between
+    the extracted answer and gold annotations.
+    """
+    DEFAULT_SYSTEM_INSTRUCTIONS = "Extract the exact text span from the context that answers the question. Return JSON only."
+    DEFAULT_TEMPLATE = """Context:
+{context}
+
+Question:
+{query_text}
+
+Instructions:
+- Find the exact text span in the Context that answers the question.
+- Copy that span VERBATIM as final_answer. Do not paraphrase, summarize, or add any words.
+- If no answer exists in the Context, set final_answer to empty string "".
+
+Return JSON:
+{{"final_answer": ""}}
+
+JSON:
+"""
+    EXPECTED_INPUTS = ["context", "query_text"]
+
+    def format(self, query_text: str, context: str, examples: str = "") -> str:
+        return super().format(query_text=query_text, context=context)
+
+
 class Text2CypherTemplate(PromptTemplate):
     DEFAULT_TEMPLATE = """
 Task: Generate a Cypher statement for querying a Neo4j graph database from a user input.

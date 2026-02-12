@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
+from neo4j_graphrag.rag.prompts import CUADRagTemplate
 from neo4j_graphrag.retrievers import VectorCypherRetriever
 from neo4j_graphrag.indexes import create_vector_index
 from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
@@ -233,8 +234,12 @@ def setup_graphrag(driver, llm, embedder):
         neo4j_database=NEO4J_DATABASE,
     )
     
-    logger.info("Creating GraphRAG...")
-    rag = GraphRAG(retriever=retriever, llm=llm)
+    logger.info("Creating GraphRAG with CUADRagTemplate...")
+    rag = GraphRAG(
+        retriever=retriever,
+        llm=llm,
+        prompt_template=CUADRagTemplate(),
+    )
     logger.info("GraphRAG initialized successfully")
     
     # Test retrieval with a simple query
