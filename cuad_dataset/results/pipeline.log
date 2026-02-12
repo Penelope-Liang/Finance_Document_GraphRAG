@@ -1,67 +1,90 @@
-12:42:28 | INFO | ============================================================
-12:42:28 | INFO | CUAD GraphRAG Test Pipeline
-12:42:28 | INFO | Started at 2026-02-12 12:42:28
-12:42:28 | INFO | ============================================================
-12:42:28 | INFO | Initializing LLM and Embedder...
-12:42:28 | INFO | LLM: qwen2.5:72b
-12:42:28 | INFO | Embedder: bge-m3:latest
-12:42:28 | INFO | Testing LLM connection...
-12:42:30 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-12:42:30 | INFO | LLM test response: OK...
-12:42:30 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
-12:42:31 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
-12:42:31 | INFO | Context length: 54,290 characters
-12:42:31 | INFO | Questions: 68
-12:42:31 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
-12:42:37 | INFO | Neo4j connection verified
-12:42:37 | INFO | Clearing existing data from Neo4j...
-12:42:37 | INFO | Found 0 existing nodes
-12:42:37 | INFO | Database already empty
-12:42:37 | INFO | Checkpoint saved: stage=kg_build_start, processed=0 questions
-12:42:37 | INFO | ==================================================
-12:42:37 | INFO | Step 1: Building Knowledge Graph
-12:42:37 | INFO | ==================================================
-12:42:37 | INFO | Creating SimpleKGPipeline...
-12:42:37 | INFO | SimpleKGPipeline created successfully
-12:42:37 | INFO | Running KG builder on 54,290 chars of text...
-12:42:37 | INFO | PIPELINE_RUNNER: starting pipeline <neo4j_graphrag.kg_builder.pipeline.pipeline.Pipeline object at 0x11b734810> with run_params={'splitter': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'schema': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'extractor': {'document_info': {'path': 'document.txt', 'metadata': None, 'document_type': 'inline_text'}}}
-12:42:38 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:38 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:39 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:42:40 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-12:47:14 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-12:47:14 | ERROR | KG build failed after 276.7s: LLM response is not valid JSON.
+13:40:51 | INFO | ============================================================
+13:40:51 | INFO | CUAD GraphRAG Test Pipeline
+13:40:51 | INFO | Started at 2026-02-12 13:40:51
+13:40:51 | INFO | ============================================================
+13:40:51 | INFO | Initializing LLM and Embedder...
+13:40:51 | INFO | LLM: qwen2.5:72b
+13:40:51 | INFO | Embedder: bge-m3:latest
+13:40:51 | INFO | Testing LLM connection...
+13:40:55 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:40:55 | INFO | LLM test response: OK...
+13:40:55 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
+13:40:55 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
+13:40:55 | INFO | Context length: 54,290 characters
+13:40:55 | INFO | Questions: 68
+13:40:55 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
+13:41:02 | INFO | Neo4j connection verified
+13:41:02 | INFO | Clearing existing data from Neo4j...
+13:41:02 | INFO | Found 0 existing nodes
+13:41:02 | INFO | Database already empty
+13:41:02 | INFO | Checkpoint saved: stage=kg_build_start, processed=0 questions
+13:41:02 | INFO | ==================================================
+13:41:02 | INFO | Step 1: Building Knowledge Graph
+13:41:02 | INFO | ==================================================
+13:41:02 | INFO | Creating SimpleKGPipeline with schema='FREE'...
+13:41:02 | INFO | SimpleKGPipeline created successfully
+13:41:02 | INFO | Running KG builder on 54,290 chars of text...
+13:41:02 | INFO | PIPELINE_RUNNER: starting pipeline <neo4j_graphrag.kg_builder.pipeline.pipeline.Pipeline object at 0x10ff36790> with run_params={'schema': {'node_types': (), 'relationship_types': (), 'patterns': (), 'constraints': (), 'additional_node_types': True, 'additional_relationship_types': True, 'additional_patterns': True}, 'splitter': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'extractor': {'document_info': {'path': 'document.txt', 'metadata': None, 'document_type': 'inline_text'}}}
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:04 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:41:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+13:43:22 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:45:05 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:48:15 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:50:13 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:51:34 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:53:53 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:55:44 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+13:58:02 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:01:28 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:02:51 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:06:10 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:08:43 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:10:20 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:14:02 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:15:16 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+14:15:16 | INFO | Received notification from DBMS server: <GqlStatusObject gql_status='00NA0', status_description="note: successful completion - index or constraint already exists. The command 'CREATE RANGE INDEX __entity__tmp_internal_id IF NOT EXISTS FOR (e:__KGBuilder__) ON (e.__tmp_internal_id)' has no effect. The index or constraint specified by 'RANGE INDEX __entity__tmp_internal_id FOR (e:__KGBuilder__) ON (e.__tmp_internal_id)' already exists.", position=None, raw_classification='SCHEMA', classification=<NotificationClassification.SCHEMA: 'SCHEMA'>, raw_severity='INFORMATION', severity=<NotificationSeverity.INFORMATION: 'INFORMATION'>, diagnostic_record={'_classification': 'SCHEMA', '_severity': 'INFORMATION', 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        CREATE INDEX __entity__tmp_internal_id IF NOT EXISTS FOR (n:__KGBuilder__) ON (n.__tmp_internal_id)\n        '
+14:15:24 | INFO | Received notification from DBMS server: <GqlStatusObject gql_status='03N90', status_description="info: cartesian product. The disconnected pattern '(start:__KGBuilder__ {__tmp_internal_id: row.start_node_id}), (end:__KGBuilder__ {__tmp_internal_id: row.end_node_id})' builds a cartesian product. A cartesian product may produce a large amount of data and slow down query processing.", position=<SummaryInputPosition line=1, column=21, offset=20>, raw_classification='PERFORMANCE', classification=<NotificationClassification.PERFORMANCE: 'PERFORMANCE'>, raw_severity='INFORMATION', severity=<NotificationSeverity.INFORMATION: 'INFORMATION'>, diagnostic_record={'_classification': 'PERFORMANCE', '_severity': 'INFORMATION', '_position': {'offset': 20, 'line': 1, 'column': 21}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: 'UNWIND $rows as row MATCH (start:__KGBuilder__ {__tmp_internal_id: row.start_node_id}),       (end:__KGBuilder__ {__tmp_internal_id: row.end_node_id}) WITH start, end, row CALL apoc.merge.relationship(start, row.type, {}, row.properties, end, row.properties) YIELD rel  WITH rel, row CALL (rel,row) {  WITH rel, row WHERE row.embedding_properties IS NOT NULL UNWIND keys(row.embedding_properties) as emb CALL db.create.setRelationshipVectorProperty(rel, emb, row.embedding_properties[emb]) } RETURN elementId(rel)'
+14:15:25 | INFO | KG built successfully in 2062.9 seconds
+14:15:25 | INFO | Pipeline result: run_id='ea1b8a78-8283-4cc4-a056-856955580372' result={'resolver': {'number_of_nodes_to_resolve': 96, 'number_of_created_nodes': 32}}
+14:15:25 | INFO | Database now has 115 nodes, 15 Chunk nodes
+14:15:25 | INFO | Checkpoint saved: stage=kg_build_complete, processed=0 questions
+14:15:25 | INFO | ==================================================
+14:15:25 | INFO | Step 2: Creating Vector Index
+14:15:25 | INFO | ==================================================
+14:15:25 | INFO | Creating vector index named 'chunk_vector_index'
+14:15:25 | INFO | Received notification from DBMS server: <GqlStatusObject gql_status='00NA0', status_description="note: successful completion - index or constraint already exists. The command 'CREATE VECTOR INDEX chunk_vector_index IF NOT EXISTS FOR (e:Chunk) ON (e.embedding) OPTIONS {indexConfig: {`vector.dimensions`: toInteger($dimensions), `vector.similarity_function`: $similarity_fn}}' has no effect. The index or constraint specified by 'VECTOR INDEX chunk_embedding_index FOR (e:Chunk) ON (e.embedding)' already exists.", position=None, raw_classification='SCHEMA', classification=<NotificationClassification.SCHEMA: 'SCHEMA'>, raw_severity='INFORMATION', severity=<NotificationSeverity.INFORMATION: 'INFORMATION'>, diagnostic_record={'_classification': 'SCHEMA', '_severity': 'INFORMATION', 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: 'CREATE VECTOR INDEX $name IF NOT EXISTS FOR (n:Chunk) ON n.embedding OPTIONS { indexConfig: { `vector.dimensions`: toInteger($dimensions), `vector.similarity_function`: $similarity_fn } }'
+14:15:25 | INFO | Created vector index: chunk_vector_index
+14:15:25 | INFO | Waiting for index to populate...
+14:15:32 | INFO | Checkpoint saved: stage=index_created, processed=0 questions
+14:15:32 | INFO | Waiting 5s for index to be ready...
+14:15:37 | INFO | ==================================================
+14:15:37 | INFO | Step 3: Setting up GraphRAG
+14:15:37 | INFO | ==================================================
+14:15:37 | INFO | Creating VectorCypherRetriever...
 Traceback (most recent call last):
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/components/schema.py", line 789, in run
-    extracted_schema: Dict[str, Any] = json.loads(content)
-                                       ^^^^^^^^^^^^^^^^^^^
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/retrievers/base.py", line 142, in _fetch_index_infos
+    result = query_result.records[0]
+             ~~~~~~~~~~~~~~~~~~~~^^^
+IndexError: list index out of range
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 476, in <module>
-    if __name__ == "__main__":
-        ^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 477, in <module>
+    asyncio.run(main())
   File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 190, in run
     return runner.run(main)
            ^^^^^^^^^^^^^^^^
@@ -71,42 +94,14 @@ Traceback (most recent call last):
   File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
     return future.result()
            ^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 432, in main
-    save_checkpoint([], 0, "kg_build_start")
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 152, in build_knowledge_graph
-    try:
-         
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/kg_builder.py", line 164, in run_async
-    return await self.runner.run(
-           ^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/config/runner.py", line 135, in run
-    result = await self.pipeline.run(data=run_param)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 568, in run
-    raise e
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 562, in run
-    res = await self._run(run_id, data)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 580, in _run
-    await orchestrator.run(data)
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/orchestrator.py", line 268, in run
-    await asyncio.gather(*tasks)
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/orchestrator.py", line 88, in run_task
-    res = await task.run(context, inputs)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 104, in run
-    res = await self.execute(context, inputs)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/pipeline.py", line 90, in execute
-    component_result = await self.component.run_with_context(
-                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/pipeline/component.py", line 110, in run_with_context
-    return await self.run(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/site-packages/pydantic/_internal/_validate_call.py", line 34, in wrapper_function
-    return await wrapper(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/kg_builder/components/schema.py", line 813, in run
-    raise SchemaExtractionError("LLM response is not valid JSON.") from exc
-neo4j_graphrag.exceptions.SchemaExtractionError: LLM response is not valid JSON.
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 447, in main
+    rag = setup_graphrag(driver, llm, embedder)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 225, in setup_graphrag
+    retriever = VectorCypherRetriever(
+                ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/retrievers/vector.py", line 301, in __init__
+    self._fetch_index_infos(self.index_name)
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/retrievers/base.py", line 147, in _fetch_index_infos
+    raise Exception(f"No index with name {self.index_name} found") from e
+Exception: No index with name chunk_vector_index found

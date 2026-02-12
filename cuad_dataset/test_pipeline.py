@@ -59,7 +59,8 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
 NEO4J_DATABASE = "neo4j"
 
 # Vector index settings
-VECTOR_INDEX_NAME = "chunk_vector_index"
+# Note: SimpleKGPipeline auto-creates index named "chunk_embedding_index"
+VECTOR_INDEX_NAME = "chunk_embedding_index"
 EMBEDDING_DIMENSION = 1024  # bge-m3 dimension
 
 # Data paths
@@ -168,38 +169,39 @@ async def build_knowledge_graph(driver, llm, embedder, context: str, title: str)
 
 
 def create_chunk_vector_index(driver, embedder):
-    """Create vector index on Chunk nodes for retrieval."""
+    """Verify vector index exists (SimpleKGPipeline creates it automatically)."""
     logger.info("=" * 50)
-    logger.info("Step 2: Creating Vector Index")
+    logger.info("Step 2: Verifying Vector Index")
     logger.info("=" * 50)
     
-    try:
-        create_vector_index(
-            driver,
-            name=VECTOR_INDEX_NAME,
-            label="Chunk",
-            embedding_property="embedding",
-            dimensions=EMBEDDING_DIMENSION,
-            similarity_fn="cosine",
-        )
-        logger.info(f"Created vector index: {VECTOR_INDEX_NAME}")
-    except Exception as e:
-        if "already exists" in str(e).lower() or "equivalent" in str(e).lower():
-            logger.info(f"Vector index {VECTOR_INDEX_NAME} already exists, skipping...")
-        else:
-            logger.error(f"Failed to create vector index: {e}")
-            raise
-    
-    # Wait and verify index is ready
-    logger.info("Waiting for index to populate...")
-    time.sleep(3)
+    # SimpleKGPipeline already creates chunk_embedding_index
+    # Just verify it exists and is ready
     with driver.session(database=NEO4J_DATABASE) as session:
         result = session.run(
             "SHOW INDEXES WHERE name = $name",
             name=VECTOR_INDEX_NAME
         ).single()
         if result:
-            logger.info(f"Index status: {result.get('state', 'unknown')}")
+            logger.info(f"Index '{VECTOR_INDEX_NAME}' found, status: {result.get('state', 'unknown')}")
+        else:
+            # Fallback: create if not exists
+            logger.info(f"Index '{VECTOR_INDEX_NAME}' not found, creating...")
+            try:
+                create_vector_index(
+                    driver,
+                    name=VECTOR_INDEX_NAME,
+                    label="Chunk",
+                    embedding_property="embedding",
+                    dimensions=EMBEDDING_DIMENSION,
+                    similarity_fn="cosine",
+                )
+                logger.info(f"Created vector index: {VECTOR_INDEX_NAME}")
+                time.sleep(3)  # Wait for index to populate
+            except Exception as e:
+                if "already exists" in str(e).lower() or "equivalent" in str(e).lower():
+                    logger.info(f"Vector index already exists")
+                else:
+                    raise
 
 
 def setup_graphrag(driver, llm, embedder):
@@ -385,11 +387,16 @@ async def main():
     existing_results = None
     skip_kg_build = False
     
-    if checkpoint and checkpoint.get("stage") == "qa_evaluation":
-        logger.info("Found Q&A checkpoint, will resume from there")
-        start_idx = checkpoint["start_idx"]
-        existing_results = checkpoint["results"]
-        skip_kg_build = True  # KG already built
+    if checkpoint:
+        stage = checkpoint.get("stage", "")
+        if stage == "qa_evaluation":
+            logger.info("Found Q&A checkpoint, will resume from there")
+            start_idx = checkpoint["start_idx"]
+            existing_results = checkpoint["results"]
+            skip_kg_build = True
+        elif stage in ("kg_build_complete", "index_created"):
+            logger.info(f"Found checkpoint at stage '{stage}', skipping KG build")
+            skip_kg_build = True
     
     # Initialize components
     logger.info("Initializing LLM and Embedder...")
