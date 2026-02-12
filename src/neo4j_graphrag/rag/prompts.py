@@ -114,7 +114,7 @@ JSON:
         return super().format(query_text=query_text, context=context, examples=examples)
 
 
-class CUADRagTemplate(PromptTemplate):
+class CUADRagTemplate(RagTemplate):
     """Prompt template for CUAD (Contract Understanding Atticus Dataset) evaluation.
     
     CUAD requires extractive answers - the answer must be an exact text span 
@@ -141,7 +141,8 @@ JSON:
     EXPECTED_INPUTS = ["context", "query_text"]
 
     def format(self, query_text: str, context: str, examples: str = "") -> str:
-        return super().format(query_text=query_text, context=context)
+        # Ignore examples parameter, use only context and query_text
+        return self.template.format(context=context, query_text=query_text)
 
 
 class Text2CypherTemplate(PromptTemplate):

@@ -1,42 +1,59 @@
-17:12:10 | INFO | ============================================================
-17:12:10 | INFO | CUAD GraphRAG Test Pipeline
-17:12:10 | INFO | Started at 2026-02-12 17:12:10
-17:12:10 | INFO | ============================================================
-17:12:10 | INFO | Initializing LLM and Embedder...
-17:12:10 | INFO | LLM: qwen2.5:72b
-17:12:10 | INFO | Embedder: bge-m3:latest
-17:12:10 | INFO | Testing LLM connection...
-17:12:14 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-17:12:14 | INFO | LLM test response: OK...
-17:12:14 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
-17:12:14 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
-17:12:14 | INFO | Context length: 54,290 characters
-17:12:14 | INFO | Questions: 68
-17:12:14 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
-17:12:21 | INFO | Neo4j connection verified
-17:12:21 | INFO | Clearing existing data from Neo4j...
-17:12:21 | INFO | Found 115 existing nodes
-17:12:21 | INFO | Database cleared
-17:12:21 | INFO | Checkpoint saved: stage=kg_build_start, processed=0 questions
-17:12:21 | INFO | ==================================================
-17:12:21 | INFO | Step 1: Building Knowledge Graph
-17:12:21 | INFO | ==================================================
-17:12:21 | INFO | Creating SimpleKGPipeline with schema='FREE'...
-17:12:21 | INFO | SimpleKGPipeline created successfully
-17:12:21 | INFO | Running KG builder on 54,290 chars of text...
-17:12:21 | INFO | PIPELINE_RUNNER: starting pipeline <neo4j_graphrag.kg_builder.pipeline.pipeline.Pipeline object at 0x152740550> with run_params={'schema': {'node_types': (), 'relationship_types': (), 'patterns': (), 'constraints': (), 'additional_node_types': True, 'additional_relationship_types': True, 'additional_patterns': True}, 'splitter': {'text': 'EXHIBIT 10.6\n\n                              DISTRIBUTOR AGREEMENT\n\n         THIS  DISTRIBUTOR  AGREEMENT (the  "Agreement")  is made by and between Electric City Corp.,  a Delaware  corporation  ("Com... (54090 chars)'}, 'extractor': {'document_info': {'path': 'document.txt', 'metadata': None, 'document_type': 'inline_text'}}}
-17:12:22 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:22 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:23 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-17:12:24 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+18:45:08 | INFO | ============================================================
+18:45:08 | INFO | CUAD GraphRAG Test Pipeline
+18:45:08 | INFO | Started at 2026-02-12 18:45:08
+18:45:08 | INFO | ============================================================
+18:45:08 | INFO | Found checkpoint: stage=kg_build_complete, processed=0 questions
+18:45:08 | INFO | Found checkpoint at stage 'kg_build_complete', skipping KG build
+18:45:08 | INFO | Initializing LLM and Embedder...
+18:45:08 | INFO | LLM: qwen2.5:72b
+18:45:08 | INFO | Embedder: bge-m3:latest
+18:45:08 | INFO | Testing LLM connection...
+18:45:08 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+18:45:08 | INFO | LLM test response: OK...
+18:45:08 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
+18:45:09 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
+18:45:09 | INFO | Context length: 54,290 characters
+18:45:09 | INFO | Questions: 68
+18:45:09 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
+18:45:15 | INFO | Neo4j connection verified
+18:45:15 | INFO | Skipping KG build (resuming from checkpoint)
+18:45:15 | INFO | ==================================================
+18:45:15 | INFO | Step 3: Setting up GraphRAG
+18:45:15 | INFO | ==================================================
+18:45:15 | INFO | Creating VectorCypherRetriever...
+18:45:15 | INFO | Creating GraphRAG with CUADRagTemplate...
+Traceback (most recent call last):
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/rag/graphrag.py", line 83, in __init__
+    validated_data = RagInitModel(
+                     ^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 1 validation error for RagInitModel
+prompt_template
+  Input should be an instance of RagTemplate [type=is_instance_of, input_value=<neo4j_graphrag.rag.promp...e object at 0x10ca474d0>, input_type=CUADRagTemplate]
+    For further information visit https://errors.pydantic.dev/2.12/v/is_instance_of
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 501, in <module>
+    asyncio.run(main())
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 471, in main
+    rag = setup_graphrag(driver, llm, embedder)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/test_pipeline.py", line 238, in setup_graphrag
+    rag = GraphRAG(
+          ^^^^^^^^^
+  File "/Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/src/neo4j_graphrag/rag/graphrag.py", line 89, in __init__
+    raise RagInitializationError(e.errors())
+neo4j_graphrag.exceptions.RagInitializationError: Initialization failed: [{'type': 'is_instance_of', 'loc': ('prompt_template',), 'msg': 'Input should be an instance of RagTemplate', 'input': <neo4j_graphrag.rag.prompts.CUADRagTemplate object at 0x10ca474d0>, 'ctx': {'class': 'RagTemplate'}, 'url': 'https://errors.pydantic.dev/2.12/v/is_instance_of'}]
