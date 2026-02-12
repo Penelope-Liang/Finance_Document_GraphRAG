@@ -70,16 +70,8 @@ Examples:
 Question:
 biology
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied from the Context that answers the question.
-- Do NOT add any extra words, units, or explanation in final_answer.
-- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
-- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
-- JSON only. No markdown. No additional keys.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """,
@@ -150,16 +142,8 @@ Examples:
 Question:
 question
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied from the Context that answers the question.
-- Do NOT add any extra words, units, or explanation in final_answer.
-- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
-- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
-- JSON only. No markdown. No additional keys.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """
@@ -222,16 +206,8 @@ Examples:
 Question:
 biology
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied from the Context that answers the question.
-- Do NOT add any extra words, units, or explanation in final_answer.
-- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
-- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
-- JSON only. No markdown. No additional keys.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """,
@@ -279,16 +255,8 @@ this is my example
 Question:
 biology
 
-Return ONLY valid JSON:
-{"final_answer": "string", "evidence": "string"}
-
-Rules:
-- Use ONLY the Context.
-- final_answer MUST be the shortest exact span copied from the Context that answers the question.
-- Do NOT add any extra words, units, or explanation in final_answer.
-- evidence MUST be a verbatim excerpt from the Context that contains final_answer.
-- If the answer is not explicitly present in the Context, set final_answer="" and evidence="".
-- JSON only. No markdown. No additional keys.
+Answer in JSON format:
+{"final_answer": "your answer here", "evidence": "relevant text from context"}
 
 JSON:
 """,
