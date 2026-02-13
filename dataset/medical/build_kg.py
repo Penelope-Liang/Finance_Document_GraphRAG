@@ -173,9 +173,11 @@ async def main(max_chunks: int = None) -> None:
         logger.info(f"Processing only first {max_chunks} chunks")
     
     # Initialize LLM (Ollama + Qwen 72B)
+    # num_ctx=8192: reduce context length to lower VRAM usage and speed up inference
+    # 8192 is sufficient for chunk extraction (~4000 chars per chunk + prompt)
     llm = OllamaLLM(
         model_name="qwen2.5:72b",
-        model_params={"options": {"temperature": 0}},
+        model_params={"options": {"temperature": 0, "num_ctx": 8192}},
     )
     
     # Connect to Neo4j and process chunks
