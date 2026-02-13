@@ -81,3 +81,10 @@ nohup python cuad_dataset/test_pipeline.py > cuad_dataset/results/pipeline.log 2
 
 # 4. 实时查看结果
 tail -f cuad_dataset/results/live_results.jsonl
+
+
+# 看实时结果
+tail -f cuad_dataset/results/live_results.jsonl
+
+# 或看 log
+tail -f cuad_dataset/results/pipeline.log

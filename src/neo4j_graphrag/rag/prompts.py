@@ -114,36 +114,6 @@ JSON:
         return super().format(query_text=query_text, context=context, examples=examples)
 
 
-class CUADRagTemplate(RagTemplate):
-    """Prompt template for CUAD (Contract Understanding Atticus Dataset) evaluation.
-    
-    CUAD requires extractive answers - the answer must be an exact text span 
-    copied verbatim from the context. The gold answers are typically very short
-    (1-5 words) - field values, not full paragraphs.
-    """
-    DEFAULT_SYSTEM_INSTRUCTIONS = "You are a contract information extractor. Extract the shortest exact text span that answers the question. Output JSON only, no markdown."
-    DEFAULT_TEMPLATE = """Context:
-{context}
-
-Question:
-{query_text}
-
-IMPORTANT: 
-- Extract ONLY the shortest text span (usually 1-5 words) that directly answers the question.
-- Do NOT include surrounding context, explanations, or full sentences.
-- For "Parties" questions, extract just the party name (e.g., "Electric City Corp." not the entire signature block).
-- For "Document Name", extract just the contract title.
-- Copy the span EXACTLY as it appears. If no answer exists, use empty string.
-
-{{"final_answer": ""}}
-"""
-    EXPECTED_INPUTS = ["context", "query_text"]
-
-    def format(self, query_text: str, context: str, examples: str = "") -> str:
-        # Ignore examples parameter, use only context and query_text
-        return self.template.format(context=context, query_text=query_text)
-
-
 class Text2CypherTemplate(PromptTemplate):
     DEFAULT_TEMPLATE = """
 Task: Generate a Cypher statement for querying a Neo4j graph database from a user input.
