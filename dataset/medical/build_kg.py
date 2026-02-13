@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 logging.getLogger("neo4j_graphrag").setLevel(logging.DEBUG)
 
 # Neo4j connection settings
-URI = os.getenv("NEO4J_URI", "neo4j://localhost:7687")
-AUTH = (os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD", "password"))
+URI = os.getenv("NEO4J_URI", "neo4j+s://998e2e0a.databases.neo4j.io")
+AUTH = (os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD", ""))
 DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 
 # Corpus file path
