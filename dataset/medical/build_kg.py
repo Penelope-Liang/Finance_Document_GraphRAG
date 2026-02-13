@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import neo4j
-from neo4j_graphrag.embeddings import OpenAIEmbeddings
+from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
 from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
 from neo4j_graphrag.kg_builder.pipeline.types.schema import (
@@ -22,7 +22,7 @@ from neo4j_graphrag.kg_builder.pipeline.types.schema import (
     RelationInputType,
 )
 from neo4j_graphrag.llm import LLMInterface
-from neo4j_graphrag.llm import OpenAILLM
+from neo4j_graphrag.llm import OllamaLLM
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -132,7 +132,7 @@ async def build_kg_from_chunk(
     kg_builder = SimpleKGPipeline(
         llm=llm,
         driver=neo4j_driver,
-        embedder=OpenAIEmbeddings(),
+        embedder=OllamaEmbeddings(model="bge-m3:latest"),
         schema={
             "node_types": NODE_TYPES,
             "relationship_types": RELATIONSHIP_TYPES,
@@ -168,13 +168,10 @@ async def main(max_chunks: int = None) -> None:
         chunks = chunks[:max_chunks]
         logger.info(f"Processing only first {max_chunks} chunks")
     
-    # Initialize LLM
-    llm = OpenAILLM(
-        model_name="gpt-4o",
-        model_params={
-            "max_tokens": 4000,
-            "response_format": {"type": "json_object"},
-        },
+    # Initialize LLM (Ollama + Qwen 72B)
+    llm = OllamaLLM(
+        model_name="qwen2.5:72b",
+        model_params={"options": {"temperature": 0}},
     )
     
     # Connect to Neo4j and process chunks
