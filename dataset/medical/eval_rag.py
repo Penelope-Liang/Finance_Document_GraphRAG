@@ -26,6 +26,7 @@ if env_file.exists():
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.rag import GraphRAG
+from neo4j_graphrag.rag.prompts import PromptTemplate
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever, VectorCypherRetriever
 
@@ -79,8 +80,21 @@ def setup_rag(driver: neo4j.Driver) -> GraphRAG:
         model_params={"options": {"temperature": 0, "num_ctx": 8192}},
     )
     
+    # Custom prompt template without examples
+    prompt_template = PromptTemplate(
+        template="""Context:
+{context}
+
+Question:
+{query_text}
+
+Answer:
+""",
+        expected_inputs=["context", "query_text"],
+    )
+    
     # Graph-enhanced retrieval query:
-    # 1. Vector search finds relevant chunks
+    # 1. Hybrid search (vector + fulltext) finds relevant chunks
     # 2. Graph traversal finds related entities from the KG
     retrieval_query = """
     WITH node AS chunk, score
@@ -94,21 +108,22 @@ def setup_rag(driver: neo4j.Driver) -> GraphRAG:
            entities
     """
     
-    # Retriever: Vector search + Graph expansion
-    retriever = VectorCypherRetriever(
+    # Retriever: Hybrid (vector + fulltext) + Graph expansion
+    retriever = HybridCypherRetriever(
         driver=driver,
-        index_name="chunk_embedding_index",
+        vector_index_name="chunk_embedding_index",
+        fulltext_index_name="chunk_fulltext_index",
         embedder=embedder,
         retrieval_query=retrieval_query,
     )
     
-    # RAG pipeline
-    rag = GraphRAG(retriever=retriever, llm=llm)
+    # RAG pipeline with custom prompt
+    rag = GraphRAG(retriever=retriever, llm=llm, prompt_template=prompt_template)
     
     return rag
 
 
-def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 5) -> list[dict]:
+def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10) -> list[dict]:
     """Run RAG on each question and collect results."""
     results = []
     
@@ -164,7 +179,7 @@ def save_results(results: list[dict], file_path: str):
     logger.info(f"Results saved to {file_path}")
 
 
-def main(limit: int = None, top_k: int = 5):
+def main(limit: int = None, top_k: int = 10):
     """Main evaluation function."""
     # Load questions
     questions = load_questions(QUESTIONS_FILE, limit=limit)
@@ -191,7 +206,7 @@ def main(limit: int = None, top_k: int = 5):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate RAG on Medical Questions")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of questions")
-    parser.add_argument("--top-k", type=int, default=5, help="Top K chunks to retrieve")
+    parser.add_argument("--top-k", type=int, default=10, help="Top K chunks to retrieve")
     
     args = parser.parse_args()
     main(limit=args.limit, top_k=args.top_k)
