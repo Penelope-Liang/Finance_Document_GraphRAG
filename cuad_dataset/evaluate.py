@@ -28,18 +28,44 @@ def get_questions_from_csv():
 qtype_dict = get_questions_from_csv()
 
 
-def get_jaccard(gt, pred):
-    remove_tokens = [".", ",", ";", ":"]
+def normalize_for_jaccard(text: str) -> str:
+    """Normalize text for Jaccard comparison.
+    
+    Handles common variations:
+    - L.L.C. vs LLC
+    - Punctuation removal
+    - Whitespace normalization
+    """
+    # Remove common punctuation
+    remove_tokens = [".", ",", ";", ":", "'", '"', "(", ")", "-", "_"]
     for token in remove_tokens:
-        gt = gt.replace(token, "")
-        pred = pred.replace(token, "")
-    gt = gt.lower()
-    pred = pred.lower()
-    gt = gt.replace("/", " ")
-    pred = pred.replace("/", " ")
+        text = text.replace(token, "")
+    
+    # Lowercase
+    text = text.lower()
+    
+    # Normalize slashes
+    text = text.replace("/", " ")
+    
+    # Collapse multiple spaces
+    text = " ".join(text.split())
+    
+    return text
+
+
+def get_jaccard(gt, pred):
+    gt = normalize_for_jaccard(gt)
+    pred = normalize_for_jaccard(pred)
 
     gt_words = set(gt.split(" "))
     pred_words = set(pred.split(" "))
+    
+    # Remove empty strings
+    gt_words.discard("")
+    pred_words.discard("")
+
+    if not gt_words or not pred_words:
+        return 0.0
 
     intersection = gt_words.intersection(pred_words)
     union = gt_words.union(pred_words)

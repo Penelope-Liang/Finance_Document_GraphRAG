@@ -118,21 +118,22 @@ class CUADRagTemplate(RagTemplate):
     """Prompt template for CUAD (Contract Understanding Atticus Dataset) evaluation.
     
     CUAD requires extractive answers - the answer must be an exact text span 
-    copied verbatim from the context. Evaluation is based on overlap between
-    the extracted answer and gold annotations.
+    copied verbatim from the context. The gold answers are typically very short
+    (1-5 words) - field values, not full paragraphs.
     """
-    DEFAULT_SYSTEM_INSTRUCTIONS = "Extract the exact text span from the context that answers the question. Return plain JSON only, no markdown."
+    DEFAULT_SYSTEM_INSTRUCTIONS = "You are a contract information extractor. Extract the shortest exact text span that answers the question. Output JSON only, no markdown."
     DEFAULT_TEMPLATE = """Context:
 {context}
 
 Question:
 {query_text}
 
-Instructions:
-- Find the exact text span in the Context that answers the question.
-- Copy that span VERBATIM as final_answer. Do not paraphrase, summarize, or add any words.
-- If no answer exists in the Context, set final_answer to empty string "".
-- Return ONLY the JSON object below. Do NOT wrap it in ```json``` or any markdown.
+IMPORTANT: 
+- Extract ONLY the shortest text span (usually 1-5 words) that directly answers the question.
+- Do NOT include surrounding context, explanations, or full sentences.
+- For "Parties" questions, extract just the party name (e.g., "Electric City Corp." not the entire signature block).
+- For "Document Name", extract just the contract title.
+- Copy the span EXACTLY as it appears. If no answer exists, use empty string.
 
 {{"final_answer": ""}}
 """

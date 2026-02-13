@@ -1,33 +1,39 @@
-18:48:35 | INFO | ============================================================
-18:48:35 | INFO | CUAD GraphRAG Test Pipeline
-18:48:35 | INFO | Started at 2026-02-12 18:48:35
-18:48:35 | INFO | ============================================================
-18:48:35 | INFO | Found checkpoint: stage=kg_build_complete, processed=0 questions
-18:48:35 | INFO | Found checkpoint at stage 'kg_build_complete', skipping KG build
-18:48:35 | INFO | Initializing LLM and Embedder...
-18:48:35 | INFO | LLM: qwen2.5:72b
-18:48:35 | INFO | Embedder: bge-m3:latest
-18:48:35 | INFO | Testing LLM connection...
-18:48:36 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
-18:48:36 | INFO | LLM test response: OK...
-18:48:36 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
-18:48:36 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
-18:48:36 | INFO | Context length: 54,290 characters
-18:48:36 | INFO | Questions: 68
-18:48:36 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
-18:48:42 | INFO | Neo4j connection verified
-18:48:42 | INFO | Skipping KG build (resuming from checkpoint)
-18:48:42 | INFO | ==================================================
-18:48:42 | INFO | Step 3: Setting up GraphRAG
-18:48:42 | INFO | ==================================================
-18:48:42 | INFO | Creating VectorCypherRetriever...
-18:48:42 | INFO | Creating GraphRAG with CUADRagTemplate...
-18:48:42 | INFO | GraphRAG initialized successfully
-18:48:42 | INFO | Testing retrieval...
-18:48:44 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-18:48:44 | INFO | Retrieval test: found 1 items
-18:48:44 | INFO | ==================================================
-18:48:44 | INFO | Step 4: Running Q&A Evaluation
-18:48:44 | INFO | ==================================================
-18:48:44 | INFO | Live results will be written to: /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/results/live_results.jsonl
-Q&A Progress:   0%|          | 0/68 [00:00<?, ?q/s]18:48:44 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+18:55:51 | INFO | ============================================================
+18:55:51 | INFO | CUAD GraphRAG Test Pipeline
+18:55:51 | INFO | Started at 2026-02-12 18:55:51
+18:55:51 | INFO | ============================================================
+18:55:51 | INFO | Found checkpoint: stage=kg_build_complete, processed=0 questions
+18:55:51 | INFO | Found checkpoint at stage 'kg_build_complete', skipping KG build
+18:55:51 | INFO | Initializing LLM and Embedder...
+18:55:51 | INFO | LLM: qwen2.5:72b
+18:55:51 | INFO | Embedder: bge-m3:latest
+18:55:51 | INFO | Testing LLM connection...
+18:55:53 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+18:55:53 | INFO | LLM test response: OK...
+18:55:53 | INFO | Loading data from /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/data/train_separate_questions.json...
+18:55:53 | INFO | Contract: LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT
+18:55:53 | INFO | Context length: 54,290 characters
+18:55:53 | INFO | Questions: 68
+18:55:53 | INFO | Connecting to Neo4j: neo4j+s://998e2e0a.databases.neo4j.io
+18:56:00 | INFO | Neo4j connection verified
+18:56:00 | INFO | Skipping KG build (resuming from checkpoint)
+18:56:00 | INFO | ==================================================
+18:56:00 | INFO | Step 3: Setting up GraphRAG
+18:56:00 | INFO | ==================================================
+18:56:00 | INFO | Creating VectorCypherRetriever...
+18:56:00 | INFO | Creating GraphRAG with CUADRagTemplate...
+18:56:00 | INFO | GraphRAG initialized successfully
+18:56:00 | INFO | Testing retrieval...
+18:56:00 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+18:56:00 | INFO | Retrieval test: found 1 items
+18:56:00 | INFO | ==================================================
+18:56:00 | INFO | Step 4: Running Q&A Evaluation
+18:56:00 | INFO | ==================================================
+18:56:00 | INFO | Live results will be written to: /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python/cuad_dataset/results/live_results.jsonl
+Q&A Progress:   0%|          | 0/68 [00:00<?, ?q/s]18:56:00 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+18:57:29 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   0%|          | 0/68 [01:28<?, ?q/s, acc=100.0%, time=88.8s, type=unknown]Q&A Progress:   1%|▏         | 1/68 [01:28<1:39:12, 88.84s/q, acc=100.0%, time=88.8s, type=unknown]18:57:29 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+18:59:06 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+Q&A Progress:   1%|▏         | 1/68 [03:05<1:39:12, 88.84s/q, acc=50.0%, time=96.7s, type=unknown] Q&A Progress:   3%|▎         | 2/68 [03:05<1:42:50, 93.49s/q, acc=50.0%, time=96.7s, type=unknown]18:59:06 | INFO | HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
+/opt/anaconda3/envs/neo4j-graphrag/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
