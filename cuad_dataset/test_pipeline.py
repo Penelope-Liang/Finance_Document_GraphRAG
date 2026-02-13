@@ -339,9 +339,9 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5, start_idx: i
             if eval_result["is_correct"]:
                 correct_count += 1
             
-            # Write to live JSONL immediately
+            # Write to live JSONL immediately (pretty format)
             with open(LIVE_JSONL_FILE, "a") as f:
-                f.write(json.dumps(eval_result, ensure_ascii=False) + "\n")
+                f.write(json.dumps(eval_result, ensure_ascii=False, indent=2) + "\n\n")
             
             # Update progress bar
             accuracy = correct_count / len(results) * 100
@@ -365,9 +365,9 @@ def run_qa_evaluation(rag, qas: list, context: str, top_k: int = 5, start_idx: i
                 llm_evidence="",
             )
             results.append(eval_result)
-            # Also write error to live JSONL
+            # Also write error to live JSONL (pretty format)
             with open(LIVE_JSONL_FILE, "a") as f:
-                f.write(json.dumps(eval_result, ensure_ascii=False) + "\n")
+                f.write(json.dumps(eval_result, ensure_ascii=False, indent=2) + "\n\n")
         
         # Save checkpoint periodically
         if i % CHECKPOINT_INTERVAL == 0:
