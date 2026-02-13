@@ -88,3 +88,7 @@ tail -f cuad_dataset/results/live_results.jsonl
 
 # 或看 log
 tail -f cuad_dataset/results/pipeline.log
+
+
+
+MATCH (n) DETACH DELETE n
