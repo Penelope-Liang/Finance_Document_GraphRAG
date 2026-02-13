@@ -27,7 +27,7 @@ import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.llm import OllamaLLM
-from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever
+from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever, VectorCypherRetriever
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -79,11 +79,27 @@ def setup_rag(driver: neo4j.Driver) -> GraphRAG:
         model_params={"options": {"temperature": 0, "num_ctx": 8192}},
     )
     
-    # Retriever (using VectorRetriever for simplicity)
-    retriever = VectorRetriever(
+    # Graph-enhanced retrieval query:
+    # 1. Vector search finds relevant chunks
+    # 2. Graph traversal finds related entities from the KG
+    retrieval_query = """
+    WITH node AS chunk, score
+    OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
+    WITH chunk, score, collect(DISTINCT {
+        label: labels(entity)[1],
+        name: entity.name
+    }) AS entities
+    RETURN chunk.text AS text,
+           score AS similarity_score,
+           entities
+    """
+    
+    # Retriever: Vector search + Graph expansion
+    retriever = VectorCypherRetriever(
         driver=driver,
         index_name="chunk_embedding_index",
         embedder=embedder,
+        retrieval_query=retrieval_query,
     )
     
     # RAG pipeline
