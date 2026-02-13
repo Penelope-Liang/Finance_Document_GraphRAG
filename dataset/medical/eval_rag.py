@@ -26,7 +26,7 @@ if env_file.exists():
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.rag import GraphRAG
-from neo4j_graphrag.rag.prompts import PromptTemplate
+from neo4j_graphrag.rag.prompts import RagTemplate
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever, VectorCypherRetriever
 
@@ -80,17 +80,26 @@ def setup_rag(driver: neo4j.Driver) -> GraphRAG:
         model_params={"options": {"temperature": 0, "num_ctx": 8192}},
     )
     
-    # Custom prompt template without examples
-    prompt_template = PromptTemplate(
-        template="""Context:
+    # Custom prompt template for medical QA
+    prompt_template = RagTemplate(
+        template="""You are a medical question answering assistant.
+
+Based on the provided context, answer the question accurately and concisely.
+
+Rules:
+1. If the context contains the answer, cite the relevant evidence.
+2. If the context is partially relevant, use it and clearly state what is supported vs. inferred.
+3. If the context does not contain relevant information, say "The provided context does not contain sufficient information to answer this question."
+4. Do not guess or use information not present in the context.
+
+Context:
 {context}
 
 Question:
 {query_text}
-
+{examples}
 Answer:
 """,
-        expected_inputs=["context", "query_text"],
     )
     
     # Graph-enhanced retrieval query:
