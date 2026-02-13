@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
@@ -175,18 +176,23 @@ async def main(max_chunks: int = None) -> None:
     )
     
     # Connect to Neo4j and process chunks
+    total_start_time = time.time()
+    
     with neo4j.GraphDatabase.driver(URI, auth=AUTH) as driver:
         logger.info("Connected to Neo4j")
         
         for i, chunk in enumerate(chunks):
+            chunk_start_time = time.time()
             try:
                 result = await build_kg_from_chunk(chunk, i, driver, llm)
-                logger.info(f"Chunk {i + 1}/{len(chunks)} processed successfully")
+                chunk_time = time.time() - chunk_start_time
+                logger.info(f"Chunk {i + 1}/{len(chunks)} processed successfully in {chunk_time:.2f}s")
             except Exception as e:
                 logger.error(f"Error processing chunk {i + 1}: {e}")
                 continue
     
-    logger.info("Knowledge Graph building completed")
+    total_time = time.time() - total_start_time
+    logger.info(f"Knowledge Graph building completed in {total_time:.2f}s ({total_time/60:.2f} min)")
 
 
 if __name__ == "__main__":
