@@ -11,6 +11,17 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
+
+# Load .env file if exists
+env_file = Path(__file__).parents[2] / ".env"
+if env_file.exists():
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
