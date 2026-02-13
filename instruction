@@ -1,94 +1,24 @@
-# GraphRAG Project - Quick Reference
+# build medical knowledge graph
+cd ~/scratchdata/Yuanqi/neo4j-graphrag-python/dataset/medical
+nohup python3 build_kg.py > medical_kg_build.log 2>&1 &
+tail -f medical_kg_build.log
 
-SSH to Mini: `ssh penelopel@100.120.75.8`
+# set environment variables
+source ~/.bashrc
+echo $NEO4J_PASSWORD
 
-## 1. First-Time Setup (Run Once)
+ollama serve & # start ollama server
 
-```bash
-cd /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python
+# list all nodes and relations in the graph
+MATCH (n)-[r]->(m) RETURN n, r, m
 
-# Create virtual environment
-uv venv
+# create vector index for the graph
+CREATE VECTOR INDEX chunk_embedding_index IF NOT EXISTS
+FOR (c:Chunk) ON (c.embedding)
+OPTIONS {indexConfig: {
+  `vector.dimensions`: 1024,
+  `vector.similarity_function`: 'cosine'
+}}
 
-# Install dependencies
-uv sync --all-extras
-```
-
-## 2. Running Code (Every Time)
-
-```bash
-# 1. Navigate to project directory
-cd /Users/penelopel/Desktop/Master/Project/neo4j-graphrag-python
-
-# 2. Run code (recommended - no need to manually activate venv)
-.venv/bin/python ask_rag.py "your question"
-
-# Or activate venv first, then run
-source .venv/bin/activate
-python ask_rag.py "your question"
-```
-
-## 3. Common Commands
-
-```bash
-# Single question
-.venv/bin/python ask_rag.py "What accounting standards were used?"
-
-# Batch questions
-.venv/bin/python batch_ask.py questions.txt
-
-# Build knowledge graph (from PDF)
-.venv/bin/python examples/build_graph/simple_kg_builder_from_pdf.py
-```
-
-## 4. Git Sync (Pro <-> Mini)
-
-```bash
-# After editing code on Pro
-git add . && git commit -m "description" && git push
-
-# Pull latest code on Mini
-git pull
-```
-
-
-
-
-# 杀掉旧进程
-pkill -f test_pipeline.py
-
-# 拉取更新
-git pull
-
-# 清除旧 checkpoint（从头开始）
-rm -f cuad_dataset/results/checkpoint.json
-
-# 重新运行
-nohup python cuad_dataset/test_pipeline.py > cuad_dataset/results/pipeline.log 2>&1 &
-tail -f cuad_dataset/results/pipeline.log
-
-
-
-# 1. 拉取最新代码（覆盖本地修改）
-git reset --hard origin/main
-
-# 2. 清除旧的checkpoint和结果
-rm -f cuad_dataset/results/checkpoint.json
-rm -f cuad_dataset/results/live_results.jsonl
-
-# 3. 后台运行pipeline
-nohup python cuad_dataset/test_pipeline.py > cuad_dataset/results/pipeline.log 2>&1 &
-
-# 4. 实时查看结果
-tail -f cuad_dataset/results/live_results.jsonl
-
-
-# 看实时结果
-tail -f cuad_dataset/results/live_results.jsonl
-
-# 或看 log
-tail -f cuad_dataset/results/pipeline.log
-
-
-
+# delete all nodes in the graph
 MATCH (n) DETACH DELETE n
