@@ -28,6 +28,7 @@ if env_file.exists():
 
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
+from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
 from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
 from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
 from neo4j_graphrag.kg_builder.pipeline.types.schema import (
@@ -142,6 +143,11 @@ async def build_kg_from_chunk(
     """Build KG from a single text chunk."""
     logger.info(f"Processing chunk {chunk_index + 1}, length: {len(chunk)} chars")
     
+    # Custom text splitter: smaller chunks for better extraction quality
+    # chunk_size=1500: smaller than default 4000, better for medical entity extraction
+    # chunk_overlap=300: more overlap for context continuity
+    splitter = FixedSizeSplitter(chunk_size=1500, chunk_overlap=300)
+    
     kg_builder = SimpleKGPipeline(
         llm=llm,
         driver=neo4j_driver,
@@ -156,6 +162,7 @@ async def build_kg_from_chunk(
         },
         from_pdf=False,
         neo4j_database=DATABASE,
+        text_splitter=splitter,
     )
     
     return await kg_builder.run_async(
@@ -186,7 +193,7 @@ async def main(max_chunks: int = None) -> None:
     
     # Initialize LLM (Ollama + Qwen 72B)
     # num_ctx=8192: reduce context length to lower VRAM usage and speed up inference
-    # 8192 is sufficient for chunk extraction (~4000 chars per chunk + prompt)
+    # 8192 provides safety margin for chunk extraction + prompt
     llm = OllamaLLM(
         model_name="qwen2.5:72b",
         model_params={"options": {"temperature": 0, "num_ctx": 8192}},
