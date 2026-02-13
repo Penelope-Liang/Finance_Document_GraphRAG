@@ -146,7 +146,7 @@ async def build_kg_from_chunk(
         text=chunk,
         document_metadata={
             "source": "medical_corpus",
-            "chunk_index": chunk_index,
+            "chunk_index": str(chunk_index),
         },
     )
 
