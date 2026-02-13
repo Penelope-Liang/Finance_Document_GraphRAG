@@ -132,8 +132,8 @@ Answer:
     return rag
 
 
-def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10) -> list[dict]:
-    """Run RAG on each question and collect results."""
+def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10, results_file: str = RESULTS_FILE) -> list[dict]:
+    """Run RAG on each question and collect results. Saves after each question."""
     results = []
     
     for i, q in enumerate(questions):
@@ -168,6 +168,9 @@ def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10) -> list[dict
         
         if rag_answer:
             logger.info(f"  Answer: {rag_answer[:100]}...")
+        
+        # Save after each question (real-time progress)
+        save_results(results, results_file)
     
     return results
 
