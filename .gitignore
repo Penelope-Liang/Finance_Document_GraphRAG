@@ -12,3 +12,6 @@ docs/build/
 .DS_Store
 .venv
 .tox/
+
+# Large dataset files (download locally or use Hugging Face)
+dataset/finance/docfinqa_*.json

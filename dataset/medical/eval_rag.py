@@ -9,6 +9,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -26,9 +27,11 @@ if env_file.exists():
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.rag import GraphRAG
-from neo4j_graphrag.rag.prompts import RagTemplate
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever, VectorCypherRetriever
+
+# Import custom prompts
+from prompts import MEDICAL_RAG_TEMPLATE
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,14 +60,36 @@ RETURN chunk.text AS text,
 """
 
 
-def load_questions(file_path: str, limit: int = None) -> list[dict]:
-    """Load questions from JSON file."""
+def load_questions(
+    file_path: str,
+    limit: int = None,
+    question_type: str = None,
+    sample_size: int = None,
+    seed: int = None,
+) -> list[dict]:
+    """Load questions from JSON file. Optionally filter by question_type and random sample."""
     with open(file_path, 'r', encoding='utf-8') as f:
         questions = json.load(f)
-    
-    if limit:
+
+    # Filter by question_type if specified
+    if question_type is not None:
+        questions = [q for q in questions if q.get('question_type') == question_type]
+        logger.info(f"Filtered to question_type={question_type!r}: {len(questions)} questions")
+
+    # Random sample if sample_size specified
+    if sample_size is not None and len(questions) > sample_size:
+        if seed is not None:
+            random.seed(seed)
+        questions = random.sample(questions, sample_size)
+        logger.info(f"Randomly sampled {sample_size} questions")
+
+    # Original behavior: limit to first N (when not using question_type/sample_size)
+    # if limit:
+    #     questions = questions[:limit]
+
+    if limit and question_type is None and sample_size is None:
         questions = questions[:limit]
-    
+
     logger.info(f"Loaded {len(questions)} questions")
     return questions
 
@@ -78,28 +103,6 @@ def setup_rag(driver: neo4j.Driver) -> GraphRAG:
     llm = OllamaLLM(
         model_name="qwen2.5:72b",
         model_params={"options": {"temperature": 0, "num_ctx": 8192}},
-    )
-    
-    # Custom prompt template for medical QA
-    prompt_template = RagTemplate(
-        template="""You are a medical question answering assistant.
-
-Based on the provided context, answer the question accurately and concisely.
-
-Rules:
-1. If the context contains the answer, cite the relevant evidence.
-2. If the context is partially relevant, use it and clearly state what is supported vs. inferred.
-3. If the context does not contain relevant information, say "The provided context does not contain sufficient information to answer this question."
-4. Do not guess or use information not present in the context.
-
-Context:
-{context}
-
-Question:
-{query_text}
-{examples}
-Answer:
-""",
     )
     
     # Graph-enhanced retrieval query:
@@ -126,8 +129,8 @@ Answer:
         retrieval_query=retrieval_query,
     )
     
-    # RAG pipeline with custom prompt
-    rag = GraphRAG(retriever=retriever, llm=llm, prompt_template=prompt_template)
+    # RAG pipeline with custom prompt from prompts.py
+    rag = GraphRAG(retriever=retriever, llm=llm, prompt_template=MEDICAL_RAG_TEMPLATE)
     
     return rag
 
@@ -191,10 +194,19 @@ def save_results(results: list[dict], file_path: str):
     logger.info(f"Results saved to {file_path}")
 
 
-def main(limit: int = None, top_k: int = 10):
+def main(limit: int = None, top_k: int = 10, question_type: str = None, sample_size: int = None, seed: int = None):
     """Main evaluation function."""
-    # Load questions
-    questions = load_questions(QUESTIONS_FILE, limit=limit)
+    # Default: 20 random "Complex Reasoning". With --limit only: original behavior (first N).
+    # questions = load_questions(QUESTIONS_FILE, limit=limit)  # original: first N
+    if limit is not None and question_type is None:
+        questions = load_questions(QUESTIONS_FILE, limit=limit)
+    else:
+        questions = load_questions(
+            QUESTIONS_FILE,
+            question_type=question_type or "Complex Reasoning",
+            sample_size=sample_size if sample_size is not None else 20,
+            seed=seed,
+        )
     
     # Connect to Neo4j and run evaluation
     with neo4j.GraphDatabase.driver(URI, auth=AUTH) as driver:
@@ -217,8 +229,17 @@ def main(limit: int = None, top_k: int = 10):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate RAG on Medical Questions")
-    parser.add_argument("--limit", type=int, default=None, help="Limit number of questions")
+    parser.add_argument("--limit", type=int, default=None, help="Limit number of questions (used when no --question-type)")
     parser.add_argument("--top-k", type=int, default=10, help="Top K chunks to retrieve")
-    
+    parser.add_argument("--question-type", type=str, default=None, help='Filter by question_type (default: "Complex Reasoning")')
+    parser.add_argument("--sample", type=int, default=None, help="Random sample size (default: 20 when --question-type used)")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible sampling")
+
     args = parser.parse_args()
-    main(limit=args.limit, top_k=args.top_k)
+    main(
+        limit=args.limit,
+        top_k=args.top_k,
+        question_type=args.question_type,
+        sample_size=args.sample,
+        seed=args.seed,
+    )

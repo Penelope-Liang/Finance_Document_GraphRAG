@@ -28,6 +28,7 @@ if env_file.exists():
 
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
+from neo4j_graphrag.kg_builder.components.entity_relation_extractor import LLMEntityRelationExtractor
 from neo4j_graphrag.kg_builder.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
 from neo4j_graphrag.kg_builder.pipeline.kg_builder import SimpleKGPipeline
 from neo4j_graphrag.kg_builder.pipeline.pipeline import PipelineResult
@@ -37,6 +38,9 @@ from neo4j_graphrag.kg_builder.pipeline.types.schema import (
 )
 from neo4j_graphrag.llm import LLMInterface
 from neo4j_graphrag.llm import OllamaLLM
+
+# Import custom prompts
+from prompts import MEDICAL_EXTRACTION_TEMPLATE, MEDICAL_EXTRACTION_EXAMPLES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -163,6 +167,7 @@ async def build_kg_from_chunk(
         from_pdf=False,
         neo4j_database=DATABASE,
         text_splitter=splitter,
+        prompt_template=MEDICAL_EXTRACTION_TEMPLATE,
     )
     
     return await kg_builder.run_async(
