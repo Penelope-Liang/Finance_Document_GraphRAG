@@ -178,8 +178,11 @@ async def main(args: argparse.Namespace):
     # Load evaluation data
     print(f"Loading evaluation data from {args.data_file}...")
     with open(args.data_file, 'r') as f:
-        file_data = json.load(f)  # List of question items
-    
+        file_data = json.load(f)
+    # Accept either a top-level list or eval_results.json-style {"results": [...]}
+    if isinstance(file_data, dict) and "results" in file_data:
+        file_data = file_data["results"]
+
     # Group data by question type
     grouped_data = {}
     for item in file_data:
@@ -201,8 +204,8 @@ async def main(args: argparse.Namespace):
 
         ids = [item['id'] for item in group_items]
         questions = [item['question'] for item in group_items]
-        evidences = [item['evidence'] for item in group_items]
-        contexts = [item['context'] for item in group_items]
+        evidences = [item.get('evidence') or [] for item in group_items]
+        contexts = [item.get('context') or [] for item in group_items]
         
         # Create dataset
         data = {
