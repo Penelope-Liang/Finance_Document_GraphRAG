@@ -25,7 +25,7 @@ if env_file.exists():
                 os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 import neo4j
-from neo4j_graphrag.embeddings import OllamaEmbeddings
+from neo4j_graphrag.embeddings import OllamaEmbeddings, SentenceTransformerEmbeddings
 from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever, VectorCypherRetriever
@@ -58,6 +58,23 @@ RETURN chunk.text AS text,
        score AS similarity_score,
        entities
 """
+
+# Max length for embed input to avoid Ollama/bge-m3 NaN issues
+MAX_EMBED_QUERY_LENGTH = 8000
+
+
+def sanitize_question(text: str) -> str:
+    """Sanitize question text to reduce Ollama embed NaN/500 errors."""
+    if not text or not isinstance(text, str):
+        return "No question text"
+    # Strip and normalize whitespace
+    s = " ".join(text.strip().split())
+    # Remove null bytes and other control chars that can break embed
+    s = "".join(c for c in s if ord(c) >= 32 or c in "\n\t")
+    # Truncate to avoid very long inputs that may trigger NaN in bge-m3
+    if len(s) > MAX_EMBED_QUERY_LENGTH:
+        s = s[:MAX_EMBED_QUERY_LENGTH].rsplit(" ", 1)[0] + "."
+    return s if s else "No question text"
 
 
 def load_questions(
@@ -94,10 +111,17 @@ def load_questions(
     return questions
 
 
-def setup_rag(driver: neo4j.Driver) -> GraphRAG:
-    """Set up the RAG pipeline."""
-    # Embedder
-    embedder = OllamaEmbeddings(model="bge-m3:latest")
+def setup_rag(driver: neo4j.Driver, embedder_type: str = "sentence-transformers") -> GraphRAG:
+    """Set up the RAG pipeline.
+    embedder_type: 'sentence-transformers' (default, no Ollama NaN) or 'ollama'
+    """
+    if embedder_type == "sentence-transformers":
+        # Same model as bge-m3:latest; avoids Ollama embed NaN/500 entirely
+        embedder = SentenceTransformerEmbeddings(model="BAAI/bge-m3")
+        logger.info("Using SentenceTransformerEmbeddings (BAAI/bge-m3) for retrieval")
+    else:
+        embedder = OllamaEmbeddings(model="bge-m3:latest")
+        logger.info("Using OllamaEmbeddings (bge-m3:latest) for retrieval")
     
     # LLM with reduced context for speed
     llm = OllamaLLM(
@@ -140,21 +164,31 @@ def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10, results_file
     results = []
     
     for i, q in enumerate(questions):
-        logger.info(f"Processing question {i+1}/{len(questions)}: {q['question'][:50]}...")
-        
+        raw_question = q["question"]
+        query_text = sanitize_question(raw_question)
+        logger.info(f"Processing question {i+1}/{len(questions)}: {query_text[:50]}...")
+
         start_time = time.time()
-        try:
-            result = rag.search(
-                query_text=q['question'],
-                retriever_config={"top_k": top_k},
-                return_context=False,
-            )
-            rag_answer = result.answer
-            error = None
-        except Exception as e:
-            rag_answer = None
-            error = str(e)
-            logger.error(f"Error on question {q['id']}: {e}")
+        rag_answer = None
+        error = None
+        for attempt in range(2):  # retry once on embed NaN/500
+            try:
+                result = rag.search(
+                    query_text=query_text,
+                    retriever_config={"top_k": top_k},
+                    return_context=False,
+                )
+                rag_answer = result.answer
+                break
+            except Exception as e:
+                error = str(e)
+                if "NaN" in error or "500" in error:
+                    logger.warning(f"Attempt {attempt + 1}/2 failed (embed error), retrying...")
+                else:
+                    logger.error(f"Error on question {q['id']}: {e}")
+                    break
+        if error and not rag_answer:
+            logger.error(f"Error on question {q['id']}: {error}")
         
         elapsed = time.time() - start_time
         
@@ -194,7 +228,14 @@ def save_results(results: list[dict], file_path: str):
     logger.info(f"Results saved to {file_path}")
 
 
-def main(limit: int = None, top_k: int = 10, question_type: str = None, sample_size: int = None, seed: int = None):
+def main(
+    limit: int = None,
+    top_k: int = 10,
+    question_type: str = None,
+    sample_size: int = None,
+    seed: int = None,
+    embedder_type: str = "sentence-transformers",
+):
     """Main evaluation function."""
     # Default: 20 random "Complex Reasoning". With --limit only: original behavior (first N).
     # questions = load_questions(QUESTIONS_FILE, limit=limit)  # original: first N
@@ -213,8 +254,8 @@ def main(limit: int = None, top_k: int = 10, question_type: str = None, sample_s
         logger.info("Connected to Neo4j")
         
         # Setup RAG
-        rag = setup_rag(driver)
-        
+        rag = setup_rag(driver, embedder_type=embedder_type)
+
         # Run evaluation
         results = evaluate(questions, rag, top_k=top_k)
     
@@ -234,6 +275,13 @@ if __name__ == "__main__":
     parser.add_argument("--question-type", type=str, default=None, help='Filter by question_type (default: "Complex Reasoning")')
     parser.add_argument("--sample", type=int, default=None, help="Random sample size (default: 20 when --question-type used)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible sampling")
+    parser.add_argument(
+        "--embedder",
+        type=str,
+        choices=["sentence-transformers", "ollama"],
+        default="sentence-transformers",
+        help="Embedder for retrieval: sentence-transformers (default, avoids Ollama NaN) or ollama",
+    )
 
     args = parser.parse_args()
     main(
@@ -242,4 +290,5 @@ if __name__ == "__main__":
         question_type=args.question_type,
         sample_size=args.sample,
         seed=args.seed,
+        embedder_type=args.embedder,
     )
