@@ -172,10 +172,20 @@ def setup_rag(driver: neo4j.Driver, embedder_type: str = "sentence-transformers"
     return rag
 
 
-def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10, results_file: str = RESULTS_FILE) -> list[dict]:
-    """Run RAG on each question and collect results. Saves after each question."""
+def evaluate(
+    questions: list[dict],
+    rag: GraphRAG,
+    top_k: int = 10,
+    results_file: str = RESULTS_FILE,
+    for_evaluation: bool = False,
+) -> list[dict]:
+    """Run RAG on each question and collect results. Saves after each question.
+
+    If for_evaluation=True: also returns context and saves generated_answer/context
+    so the output can be fed to Evaluation/generation_eval.py and retrieval_eval.py.
+    """
     results = []
-    
+
     for i, q in enumerate(questions):
         raw_question = q["question"]
         query_text = sanitize_question(raw_question)
@@ -184,14 +194,18 @@ def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10, results_file
         start_time = time.time()
         rag_answer = None
         error = None
+        retrieved_context = None  # for Evaluation (context list)
         for attempt in range(2):  # retry once on embed NaN/500
             try:
+                # for_evaluation: return_context=True so we can save context for Evaluation/
                 result = rag.search(
                     query_text=query_text,
                     retriever_config={"top_k": top_k},
-                    return_context=False,
+                    return_context=for_evaluation,
                 )
                 rag_answer = result.answer
+                if for_evaluation and hasattr(result, "context") and result.context:
+                    retrieved_context = result.context if isinstance(result.context, list) else [result.context]
                 break
             except Exception as e:
                 error = str(e)
@@ -202,43 +216,65 @@ def evaluate(questions: list[dict], rag: GraphRAG, top_k: int = 10, results_file
                     break
         if error and not rag_answer:
             logger.error(f"Error on question {q['id']}: {error}")
-        
+
         elapsed = time.time() - start_time
-        
-        results.append({
-            "id": q['id'],
-            "question": q['question'],
-            "ground_truth": q['answer'],
+
+        # Base fields (always saved)
+        record = {
+            "id": q["id"],
+            "question": q["question"],
+            "ground_truth": q["answer"],
             "rag_answer": rag_answer,
-            "question_type": q.get('question_type'),
-            "evidence": q.get('evidence'),
+            "question_type": q.get("question_type"),
+            "evidence": q.get("evidence"),
             "elapsed_seconds": round(elapsed, 2),
             "error": error,
-        })
-        
+        }
+        # For Evaluation/: same record + generated_answer + context (list) so generation_eval/retrieval_eval can read it
+        # if for_evaluation:
+        #     record["generated_answer"] = rag_answer
+        #     record["context"] = retrieved_context or []
+        if for_evaluation:
+            record["generated_answer"] = rag_answer
+            record["context"] = retrieved_context if retrieved_context is not None else []
+
+        results.append(record)
+
         if rag_answer:
             logger.info(f"  Answer: {rag_answer[:100]}...")
-        
+
         # Save after each question (real-time progress)
-        save_results(results, results_file)
-    
+        save_results(results, results_file, for_evaluation=for_evaluation)
+
     return results
 
 
-def save_results(results: list[dict], file_path: str):
-    """Save results to JSON file."""
+def save_results(results: list[dict], file_path: str, for_evaluation: bool = False):
+    """Save results to JSON file. If for_evaluation=True, also write a list-only file for Evaluation/."""
     output = {
         "timestamp": datetime.now().isoformat(),
         "total_questions": len(results),
-        "successful": sum(1 for r in results if r['rag_answer']),
-        "failed": sum(1 for r in results if r['error']),
+        "successful": sum(1 for r in results if r.get("rag_answer")),
+        "failed": sum(1 for r in results if r.get("error")),
         "results": results,
     }
-    
-    with open(file_path, 'w', encoding='utf-8') as f:
+
+    with open(file_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
-    
+
     logger.info(f"Results saved to {file_path}")
+
+    # Evaluation/generation_eval.py expects data_file to be a top-level list of items
+    # if for_evaluation:
+    #     eval_file = file_path.replace(".json", "_for_evaluation.json")
+    #     with open(eval_file, "w", encoding="utf-8") as f:
+    #         json.dump(results, f, indent=2, ensure_ascii=False)
+    #     logger.info(f"Evaluation-ready list saved to {eval_file}")
+    if for_evaluation:
+        eval_file = file_path.replace(".json", "_for_evaluation.json")
+        with open(eval_file, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        logger.info(f"Evaluation-ready list saved to {eval_file}")
 
 
 def main(
@@ -248,6 +284,7 @@ def main(
     sample_size: int = None,
     seed: int = None,
     embedder_type: str = "sentence-transformers",
+    for_evaluation: bool = False,
 ):
     """Main evaluation function."""
     # Default: 20 random "Complex Reasoning". With --limit only: original behavior (first N).
@@ -261,19 +298,19 @@ def main(
             sample_size=sample_size if sample_size is not None else 20,
             seed=seed,
         )
-    
+
     # Connect to Neo4j and run evaluation
     with neo4j.GraphDatabase.driver(URI, auth=AUTH) as driver:
         logger.info("Connected to Neo4j")
-        
+
         # Setup RAG
         rag = setup_rag(driver, embedder_type=embedder_type)
 
-        # Run evaluation
-        results = evaluate(questions, rag, top_k=top_k)
-    
-    # Save results
-    save_results(results, RESULTS_FILE)
+        # Run evaluation (for_evaluation=True: save context + generated_answer for Evaluation/)
+        results = evaluate(questions, rag, top_k=top_k, for_evaluation=for_evaluation)
+
+    # Save results (for_evaluation already saved inside evaluate; here just ensure final save)
+    save_results(results, RESULTS_FILE, for_evaluation=for_evaluation)
     
     # Print summary
     successful = sum(1 for r in results if r['rag_answer'])
@@ -295,6 +332,11 @@ if __name__ == "__main__":
         default="sentence-transformers",
         help="Embedder for retrieval: sentence-transformers (default, avoids Ollama NaN) or ollama",
     )
+    parser.add_argument(
+        "--for-evaluation",
+        action="store_true",
+        help="Save context + generated_answer and write eval_results_for_evaluation.json (list) for Evaluation/generation_eval.py",
+    )
 
     args = parser.parse_args()
     main(
@@ -304,4 +346,5 @@ if __name__ == "__main__":
         sample_size=args.sample,
         seed=args.seed,
         embedder_type=args.embedder,
+        for_evaluation=args.for_evaluation,
     )
