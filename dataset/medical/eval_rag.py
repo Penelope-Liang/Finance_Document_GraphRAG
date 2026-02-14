@@ -24,6 +24,19 @@ if env_file.exists():
                 key, value = line.split("=", 1)
                 os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
+# Use project/scratch cache for Hugging Face to avoid "No space left on device" on small home.
+# Must set TMPDIR too: downloads write to temp dir first, often /tmp (on full disk).
+_cache_dir = Path(__file__).parents[2] / ".cache" / "huggingface"
+_cache_dir.mkdir(parents=True, exist_ok=True)
+_tmp_dir = _cache_dir / "tmp"
+_tmp_dir.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME", str(_cache_dir))
+os.environ.setdefault("TRANSFORMERS_CACHE", str(_cache_dir))
+os.environ.setdefault("HF_HUB_CACHE", str(_cache_dir))
+os.environ.setdefault("TMPDIR", str(_tmp_dir))
+os.environ.setdefault("TEMP", str(_tmp_dir))
+os.environ.setdefault("TMP", str(_tmp_dir))
+
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings, SentenceTransformerEmbeddings
 from neo4j_graphrag.rag import GraphRAG
