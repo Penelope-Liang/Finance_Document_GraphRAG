@@ -125,6 +125,10 @@ async def evaluate_sample(
 
 async def main(args: argparse.Namespace):
     """Main retrieval evaluation function"""
+    # When using Ollama, default base_url to local Ollama (avoid 404 from OpenAI default)
+    if args.mode == "ollama" and (not args.base_url or "openai.com" in args.base_url):
+        args.base_url = "http://localhost:11434"
+
     if args.mode == "API":
         # Check API key
         if not os.getenv("LLM_API_KEY"):
