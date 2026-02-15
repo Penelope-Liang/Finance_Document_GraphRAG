@@ -10,11 +10,11 @@ class OllamaClient:
     
     async def _get_session(self):
         if self.session is None:
-            # Increase timeout to accommodate long LLM responses
+            # Increase timeout for large models (e.g. 72B) and long evaluation prompts
             timeout = aiohttp.ClientTimeout(
-                total=180,      # Total timeout: 3 minutes
-                connect=15,     # Connection timeout: 15 seconds
-                sock_read=120   # Read timeout: 2 minutes
+                total=600,      # Total timeout: 10 minutes
+                connect=30,     # Connection timeout: 30 seconds
+                sock_read=540   # Read timeout: 9 minutes per response
             )
             # Configure connection pool limits
             connector = aiohttp.TCPConnector(
