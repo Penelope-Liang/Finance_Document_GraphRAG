@@ -41,7 +41,7 @@ import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings, SentenceTransformerEmbeddings
 from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.llm import OllamaLLM
-from neo4j_graphrag.retrievers import HybridCypherRetriever, VectorRetriever, VectorCypherRetriever
+from neo4j_graphrag.retrievers import HybridCypherRetriever, RerankingRetriever, VectorRetriever, VectorCypherRetriever
 
 # Import custom prompts
 from prompts import MEDICAL_RAG_TEMPLATE
@@ -124,9 +124,18 @@ def load_questions(
     return questions
 
 
-def setup_rag(driver: neo4j.Driver, embedder_type: str = "sentence-transformers") -> GraphRAG:
+def setup_rag(
+    driver: neo4j.Driver,
+    embedder_type: str = "sentence-transformers",
+    use_rerank: bool = True,
+    rerank_model: str = "BAAI/bge-reranker-v2-m3",
+    top_k_retrieve: int | None = None,
+) -> GraphRAG:
     """Set up the RAG pipeline.
     embedder_type: 'sentence-transformers' (default, no Ollama NaN) or 'ollama'
+    use_rerank: if True, wrap retriever with CrossEncoder reranker
+    rerank_model: HuggingFace model for reranking (e.g. BAAI/bge-reranker-v2-m3)
+    top_k_retrieve: how many chunks to fetch before rerank (default: 2 * top_k at search time)
     """
     if embedder_type == "sentence-transformers":
         # Same model as bge-m3:latest; avoids Ollama embed NaN/500 entirely
@@ -165,6 +174,13 @@ def setup_rag(driver: neo4j.Driver, embedder_type: str = "sentence-transformers"
         embedder=embedder,
         retrieval_query=retrieval_query,
     )
+    if use_rerank:
+        retriever = RerankingRetriever(
+            inner_retriever=retriever,
+            cross_encoder_model=rerank_model,
+            top_k_retrieve=top_k_retrieve,
+        )
+        logger.info("Using CrossEncoder reranker: %s", rerank_model)
     
     # RAG pipeline with custom prompt from prompts.py
     rag = GraphRAG(retriever=retriever, llm=llm, prompt_template=MEDICAL_RAG_TEMPLATE)
@@ -285,6 +301,9 @@ def main(
     seed: int = None,
     embedder_type: str = "sentence-transformers",
     for_evaluation: bool = False,
+    use_rerank: bool = True,
+    rerank_model: str = "BAAI/bge-reranker-v2-m3",
+    top_k_retrieve: int = None,
 ):
     """Main evaluation function."""
     # Default: 20 random "Complex Reasoning". With --limit only: original behavior (first N).
@@ -303,8 +322,14 @@ def main(
     with neo4j.GraphDatabase.driver(URI, auth=AUTH) as driver:
         logger.info("Connected to Neo4j")
 
-        # Setup RAG
-        rag = setup_rag(driver, embedder_type=embedder_type)
+        # Setup RAG (optionally with CrossEncoder reranker)
+        rag = setup_rag(
+            driver,
+            embedder_type=embedder_type,
+            use_rerank=use_rerank,
+            rerank_model=rerank_model,
+            top_k_retrieve=top_k_retrieve,
+        )
 
         # Run evaluation (for_evaluation=True: save context + generated_answer for Evaluation/)
         results = evaluate(questions, rag, top_k=top_k, for_evaluation=for_evaluation)
@@ -337,6 +362,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Save context + generated_answer and write eval_results_for_evaluation.json (list) for Evaluation/generation_eval.py",
     )
+    parser.add_argument(
+        "--no-rerank",
+        action="store_true",
+        help="Disable CrossEncoder reranker (rerank is on by default)",
+    )
+    parser.add_argument(
+        "--rerank-model",
+        type=str,
+        default="BAAI/bge-reranker-v2-m3",
+        help="HuggingFace model for reranking (default: BAAI/bge-reranker-v2-m3)",
+    )
+    parser.add_argument(
+        "--top-k-retrieve",
+        type=int,
+        default=None,
+        help="Number of chunks to fetch before reranking (default: 2 * top_k)",
+    )
 
     args = parser.parse_args()
     main(
@@ -347,4 +389,7 @@ if __name__ == "__main__":
         seed=args.seed,
         embedder_type=args.embedder,
         for_evaluation=args.for_evaluation,
+        use_rerank=not args.no_rerank,
+        rerank_model=args.rerank_model,
+        top_k_retrieve=args.top_k_retrieve,
     )

@@ -14,6 +14,7 @@
 #  limitations under the License.
 
 from .hybrid import HybridCypherRetriever, HybridRetriever
+from .reranking import RerankingRetriever
 from .text2cypher import Text2CypherRetriever
 from .tools_retriever import ToolsRetriever
 from .vector import VectorCypherRetriever, VectorRetriever
@@ -23,6 +24,7 @@ __all__ = [
     "VectorCypherRetriever",
     "HybridRetriever",
     "HybridCypherRetriever",
+    "RerankingRetriever",
     "Text2CypherRetriever",
     "ToolsRetriever",
 ]
