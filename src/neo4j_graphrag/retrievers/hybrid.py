@@ -41,6 +41,7 @@ from neo4j_graphrag.types import (
     SearchType,
     HybridSearchRanker,
 )
+from neo4j_graphrag.utils.fulltext_query import sanitize_lucene_query
 from neo4j_graphrag.utils.logging import prettify
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,9 @@ class HybridRetriever(Retriever):
                 )
             query_vector = self.embedder.embed_query(query_text)
             parameters["query_vector"] = query_vector
+        # Sanitize for Lucene fulltext to avoid ParseException / TokenMgrError
+        if "query_text" in parameters and parameters["query_text"]:
+            parameters["query_text"] = sanitize_lucene_query(parameters["query_text"])
         search_query, _ = get_search_query(
             search_type=SearchType.HYBRID,
             return_properties=self.return_properties,
@@ -224,7 +228,8 @@ class HybridRetriever(Retriever):
                 routing_=neo4j.RoutingControl.READ,
             )
         except neo4j.exceptions.ClientError as e:
-            if "org.apache.lucene.queryparser.classic.ParseException" in str(e):
+            err_msg = str(e)
+            if "ParseException" in err_msg or "TokenMgrError" in err_msg or "queryparser" in err_msg:
                 raise SearchQueryParseError(
                     f"Invalid Lucene query generated from query_text: {query_text}"
                 ) from e
@@ -377,6 +382,9 @@ class HybridCypherRetriever(Retriever):
                 )
             query_vector = self.embedder.embed_query(query_text)
             parameters["query_vector"] = query_vector
+        # Sanitize for Lucene fulltext to avoid ParseException / TokenMgrError
+        if "query_text" in parameters and parameters["query_text"]:
+            parameters["query_text"] = sanitize_lucene_query(parameters["query_text"])
 
         if query_params:
             for key, value in query_params.items():
@@ -406,7 +414,8 @@ class HybridCypherRetriever(Retriever):
                 routing_=neo4j.RoutingControl.READ,
             )
         except neo4j.exceptions.ClientError as e:
-            if "org.apache.lucene.queryparser.classic.ParseException" in str(e):
+            err_msg = str(e)
+            if "ParseException" in err_msg or "TokenMgrError" in err_msg or "queryparser" in err_msg:
                 raise SearchQueryParseError(
                     f"Invalid Lucene query generated from query_text: {query_text}"
                 ) from e

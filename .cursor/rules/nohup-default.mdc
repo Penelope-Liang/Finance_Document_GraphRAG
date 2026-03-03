@@ -1,0 +1,18 @@
+---
+description: Use nohup for long-running terminal commands by default
+alwaysApply: true
+---
+
+# Long-running commands: use nohup by default
+
+When suggesting terminal commands that are long-running (e.g. eval scripts, training, build_kg, dev servers), **default to nohup** so the process survives terminal close and output is logged.
+
+- Prefer: `nohup python script.py ... > log.txt 2>&1 &` (or `nohup ... &` with a descriptive log path).
+- Use a clear log path, e.g. `dataset/medical/eval_rag.log`, `nohup_eval_20q.log`, or under a `logs/` dir.
+- Mention that the user can `tail -f <logfile>` to watch progress.
+
+Example:
+```bash
+nohup python dataset/medical/eval_rag.py --question-type "Complex Reasoning" --sample 20 > dataset/medical/eval_rag.log 2>&1 &
+tail -f dataset/medical/eval_rag.log
+```
