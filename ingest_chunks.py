@@ -46,6 +46,13 @@ class ParsedChunk:
     parser_engine: str
 
 
+ITEM_10K_HEADER_RE = re.compile(
+    r"(?i)^\s*(?:part\s+[ivx]+\s+)?item\s+"
+    r"(1a|1b|1c|1|2|3|4|5|6|7a|7|8|9a|9b|9c|9|10|11|12|13|14|15|16)"
+    r"\s*[\.\-:\)]?\s*(.*)$"
+)
+
+
 def normalize_for_id(value: Optional[str]) -> str:
     if value is None:
         return ""
@@ -340,6 +347,120 @@ def metadata_subset(element: Any) -> dict[str, Any]:
     return result
 
 
+def _first_non_empty_line(text: str) -> str:
+    for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _item10k_section_from_text(text: str) -> tuple[Optional[str], Optional[str]]:
+    first_line = _first_non_empty_line(text)
+    if not first_line:
+        return None, None
+    match = ITEM_10K_HEADER_RE.match(first_line)
+    if not match:
+        return None, None
+    item_number = match.group(1).upper()
+    title = normalize_section_display(match.group(2) or "")
+    return f"ITEM {item_number}", title or None
+
+
+def _split_section_text_for_item10k(
+    text: str,
+    *,
+    max_characters: int,
+    new_after_n_chars: int,
+    overlap: int,
+) -> list[str]:
+    target_size = max(1, min(max_characters, new_after_n_chars))
+    safe_overlap = max(0, min(overlap, target_size - 1))
+    return split_fixed_size(
+        text=text,
+        chunk_size=target_size,
+        chunk_overlap=safe_overlap,
+        approximate=True,
+    )
+
+
+def parse_and_chunk_item10k(elements: list[Any], args: argparse.Namespace) -> list[ParsedChunk]:
+    grouped_sections: list[dict[str, Any]] = []
+    current_section = "UNSPECIFIED"
+    current_title: Optional[str] = None
+    buffer: list[str] = []
+    page: Optional[int] = None
+    base_metadata: dict[str, Any] = {}
+    found_item_header = False
+
+    def flush() -> None:
+        nonlocal buffer, page, base_metadata, current_title
+        text = "\n\n".join(part.strip() for part in buffer if part and part.strip()).strip()
+        if not text:
+            buffer = []
+            page = None
+            base_metadata = {}
+            return
+        grouped_sections.append(
+            {
+                "section_name": current_section,
+                "section_title": current_title,
+                "text": text,
+                "page": page,
+                "metadata": dict(base_metadata),
+            }
+        )
+        buffer = []
+        page = None
+        base_metadata = {}
+
+    for element in elements:
+        element_text = (getattr(element, "text", "") or "").strip()
+        if not element_text:
+            continue
+        detected_section, detected_title = _item10k_section_from_text(element_text)
+        if detected_section:
+            found_item_header = True
+            flush()
+            current_section = detected_section
+            current_title = detected_title
+        if page is None:
+            candidate_page = getattr(getattr(element, "metadata", None), "page_number", None)
+            page = candidate_page if isinstance(candidate_page, int) else None
+        if not base_metadata:
+            base_metadata = metadata_subset(element)
+            if current_title:
+                base_metadata["item_title"] = current_title
+        buffer.append(element_text)
+    flush()
+
+    if not grouped_sections or not found_item_header:
+        return []
+
+    parsed_chunks: list[ParsedChunk] = []
+    for section in grouped_sections:
+        chunks = _split_section_text_for_item10k(
+            section["text"],
+            max_characters=args.unstructured_max_characters,
+            new_after_n_chars=args.unstructured_new_after_n_chars,
+            overlap=args.unstructured_overlap,
+        )
+        for chunk_text in chunks:
+            if not chunk_text.strip():
+                continue
+            parsed_chunks.append(
+                ParsedChunk(
+                    text=chunk_text,
+                    section_name=section["section_name"],
+                    page=section["page"],
+                    metadata=section["metadata"],
+                    chunk_engine="item10k",
+                    parser_engine="unstructured",
+                )
+            )
+    return parsed_chunks
+
+
 def route_type_for_ext(ext: str) -> Optional[str]:
     if ext in SUPPORTED_STRUCTURED_EXTS:
         return "native"
@@ -380,13 +501,22 @@ def parse_and_chunk_unstructured(path: Path, args: argparse.Namespace) -> list[P
     if not elements:
         return []
 
+    strategy = args.unstructured_chunking
+    if strategy == "item10k":
+        item10k_chunks = parse_and_chunk_item10k(elements, args)
+        if item10k_chunks:
+            return item10k_chunks
+        if args.unstructured_fallback_basic:
+            strategy = "basic"
+        else:
+            return []
+
     has_title = any(
         getattr(element, "category", "") == "Title"
         and normalize_section_display(getattr(element, "text", ""))
         for element in elements
     )
 
-    strategy = args.unstructured_chunking
     if strategy == "by_title" and not has_title and args.unstructured_fallback_basic:
         strategy = "basic"
 
@@ -494,7 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--unstructured-chunking",
-        choices=["by_title", "basic"],
+        choices=["by_title", "basic", "item10k"],
         default="by_title",
         help="Default unstructured chunking strategy.",
     )
