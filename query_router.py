@@ -218,6 +218,135 @@ def _load_faiss_mapping(mapping_path: str) -> dict[int, dict[str, Any]]:
     return mapping
 
 
+def _neo4j_chunk_count(driver: neo4j.Driver, database: Optional[str]) -> int:
+    result = driver.execute_query(
+        "MATCH (c:Chunk) RETURN count(c) AS n",
+        database_=database,
+        routing_=neo4j.RoutingControl.READ,
+    )
+    if not result.records:
+        return 0
+    return int(result.records[0].get("n", 0) or 0)
+
+
+def _neo4j_index_exists(
+    driver: neo4j.Driver, *, index_name: str, index_type: str, database: Optional[str]
+) -> bool:
+    if index_type == "vector":
+        query = """
+        SHOW VECTOR INDEXES
+        YIELD name
+        WHERE name = $name
+        RETURN count(*) > 0 AS exists
+        """
+    elif index_type == "fulltext":
+        query = """
+        SHOW FULLTEXT INDEXES
+        YIELD name
+        WHERE name = $name
+        RETURN count(*) > 0 AS exists
+        """
+    else:
+        raise ValueError(f"Unsupported index_type: {index_type}")
+
+    result = driver.execute_query(
+        query,
+        {"name": index_name},
+        database_=database,
+        routing_=neo4j.RoutingControl.READ,
+    )
+    return bool(result.records and result.records[0].get("exists"))
+
+
+def _count_chunk_ids_present(
+    driver: neo4j.Driver, *, chunk_ids: list[str], database: Optional[str]
+) -> int:
+    if not chunk_ids:
+        return 0
+    result = driver.execute_query(
+        """
+        UNWIND $chunk_ids AS cid
+        OPTIONAL MATCH (c:Chunk {chunk_id: cid})
+        RETURN count(c) AS n
+        """,
+        {"chunk_ids": chunk_ids},
+        database_=database,
+        routing_=neo4j.RoutingControl.READ,
+    )
+    if not result.records:
+        return 0
+    return int(result.records[0].get("n", 0) or 0)
+
+
+def _run_preflight_checks(
+    *,
+    args: argparse.Namespace,
+    driver: neo4j.Driver,
+    faiss_mapping: dict[int, dict[str, Any]],
+) -> None:
+    chunk_count = _neo4j_chunk_count(driver, args.neo4j_database)
+    if chunk_count <= 0:
+        raise RuntimeError(
+            "Preflight failed: Neo4j has no :Chunk nodes. "
+            "Run graph import first, then build FAISS, then query."
+        )
+
+    if args.retrieval == "hybrid":
+        if not _neo4j_index_exists(
+            driver,
+            index_name=args.fulltext_index,
+            index_type="fulltext",
+            database=args.neo4j_database,
+        ):
+            raise RuntimeError(
+                f"Preflight failed: fulltext index not found: {args.fulltext_index}"
+            )
+
+    if args.dense_backend == "neo4j":
+        if not _neo4j_index_exists(
+            driver,
+            index_name=args.vector_index,
+            index_type="vector",
+            database=args.neo4j_database,
+        ):
+            raise RuntimeError(
+                f"Preflight failed: vector index not found: {args.vector_index}"
+            )
+        print(
+            f"[preflight] ok: chunk_count={chunk_count}, vector_index={args.vector_index}, "
+            f"fulltext_index={'required' if args.retrieval == 'hybrid' else 'not-required'}"
+        )
+        return
+
+    if not faiss_mapping:
+        raise RuntimeError("Preflight failed: FAISS mapping is empty.")
+
+    sample_chunk_ids: list[str] = []
+    for row in faiss_mapping.values():
+        chunk_id = row.get("chunk_id")
+        if chunk_id is None:
+            continue
+        sample_chunk_ids.append(str(chunk_id))
+        if len(sample_chunk_ids) >= 50:
+            break
+    if not sample_chunk_ids:
+        raise RuntimeError("Preflight failed: FAISS mapping has no chunk_id entries.")
+
+    present = _count_chunk_ids_present(
+        driver, chunk_ids=sample_chunk_ids, database=args.neo4j_database
+    )
+    if present <= 0:
+        raise RuntimeError(
+            "Preflight failed: sample chunk_ids from FAISS mapping do not exist in Neo4j."
+        )
+
+    print(
+        f"[preflight] ok: chunk_count={chunk_count}, faiss_ids={len(faiss_mapping)}, "
+        f"faiss_sample_matched={present}/{len(sample_chunk_ids)}, "
+        f"fulltext_index={'required' if args.retrieval == 'hybrid' else 'not-required'}"
+    )
+
+
 def _faiss_dense_search(
     *,
     index: Any,
@@ -705,7 +834,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--neo4j-uri",
-        default=os.environ.get("NEO4J_URI", "neo4j+s://998e2e0a.databases.neo4j.io"),
+        default=os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         help="Neo4j URI.",
     )
     parser.add_argument(
@@ -744,6 +873,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=float(os.environ.get("OLLAMA_TEMPERATURE", "0")),
         help="LLM temperature.",
     )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Only run readiness checks (Neo4j + indexes + FAISS mapping) and exit.",
+    )
     return parser
 
 
@@ -752,11 +886,11 @@ def main() -> None:
     args = parser.parse_args()
 
     questions = _load_questions(args)
-    if not questions:
+    if not questions and not args.preflight_only:
         print("No questions provided. Use --questions-file or -q.", file=sys.stderr)
         sys.exit(1)
 
-    if args.hybrid_ranker == "linear" and args.alpha is None:
+    if not args.preflight_only and args.hybrid_ranker == "linear" and args.alpha is None:
         print("--alpha is required when --hybrid-ranker=linear", file=sys.stderr)
         sys.exit(1)
 
@@ -771,12 +905,8 @@ def main() -> None:
 
     modes = _resolve_mode_list(args.mode)
     run_rows: list[dict[str, Any]] = []
-
-    llm = OllamaLLM(
-        model_name=args.llm_model,
-        model_params={"options": {"temperature": args.temperature}},
-    )
-    embedder = OllamaEmbeddings(model=args.embedder_model)
+    llm: Optional[OllamaLLM] = None
+    embedder: Optional[OllamaEmbeddings] = None
 
     try:
         faiss_index = None
@@ -795,6 +925,17 @@ def main() -> None:
         with neo4j.GraphDatabase.driver(
             args.neo4j_uri, auth=(args.neo4j_user, password)
         ) as driver:
+            _run_preflight_checks(args=args, driver=driver, faiss_mapping=faiss_mapping)
+            if args.preflight_only:
+                print("Preflight passed. Exiting without running queries.")
+                return
+
+            llm = OllamaLLM(
+                model_name=args.llm_model,
+                model_params={"options": {"temperature": args.temperature}},
+            )
+            embedder = OllamaEmbeddings(model=args.embedder_model)
+
             rag_by_mode: dict[str, GraphRAG] = {}
             if args.dense_backend == "neo4j":
                 for mode in modes:
@@ -903,9 +1044,13 @@ def main() -> None:
                     print(f"  latency_ms: {latency_ms}")
 
     finally:
-        if hasattr(llm, "client") and hasattr(llm.client, "_client"):
+        if llm is not None and hasattr(llm, "client") and hasattr(llm.client, "_client"):
             llm.client._client.close()
-        if hasattr(embedder, "client") and hasattr(embedder.client, "_client"):
+        if (
+            embedder is not None
+            and hasattr(embedder, "client")
+            and hasattr(embedder.client, "_client")
+        ):
             embedder.client._client.close()
 
     _save_results(args.output, args.output_format, run_rows)

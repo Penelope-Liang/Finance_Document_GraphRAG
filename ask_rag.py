@@ -12,7 +12,7 @@ Required env vars:
 - NEO4J_PASSWORD
 
 Optional env vars:
-- NEO4J_URI (default: neo4j+s://998e2e0a.databases.neo4j.io)
+- NEO4J_URI (default: bolt://127.0.0.1:7687)
 - NEO4J_VECTOR_INDEX (default: chunk_embedding_index)
 """
 
@@ -58,7 +58,7 @@ def main() -> None:
         print("No question provided.", file=sys.stderr)
         sys.exit(1)
 
-    uri = os.environ.get("NEO4J_URI", "neo4j+s://998e2e0a.databases.neo4j.io")
+    uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
     password = _require_env("NEO4J_PASSWORD")
     index_name = os.environ.get("NEO4J_VECTOR_INDEX", "chunk_embedding_index")
 

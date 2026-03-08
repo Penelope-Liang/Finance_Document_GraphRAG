@@ -48,7 +48,7 @@ def main() -> None:
     print(f"Loaded {len(questions)} questions")
 
     # Setup
-    uri = os.environ.get("NEO4J_URI", "neo4j+s://998e2e0a.databases.neo4j.io")
+    uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
     password = _require_env("NEO4J_PASSWORD")
     vector_index = os.environ.get("NEO4J_VECTOR_INDEX", "chunk_embedding_index")
     fulltext_index = "chunk_fulltext_index"
