@@ -14,6 +14,7 @@ import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
+from neo4j_graphrag.rag.prompts import RagTemplate
 from neo4j_graphrag.retrievers import (
     HybridCypherRetriever,
     HybridRetriever,
@@ -183,6 +184,384 @@ def _build_context_preview(
     return content
 
 
+def _import_faiss():
+    try:
+        import faiss
+    except ImportError as exc:
+        raise ImportError(
+            "Could not import faiss. Install with `uv pip install faiss-cpu` "
+            "or install faiss-gpu on your GPU machine."
+        ) from exc
+    return faiss
+
+
+def _import_numpy():
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise ImportError("Could not import numpy. Install with `uv pip install numpy`.") from exc
+    return np
+
+
+def _load_faiss_mapping(mapping_path: str) -> dict[int, dict[str, Any]]:
+    mapping: dict[int, dict[str, Any]] = {}
+    with open(mapping_path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, start=1):
+            raw = line.strip()
+            if not raw:
+                continue
+            payload = json.loads(raw)
+            int_id = payload.get("int_id")
+            if int_id is None:
+                raise ValueError(f"Missing int_id in {mapping_path}:{line_no}")
+            mapping[int(int_id)] = payload
+    return mapping
+
+
+def _faiss_dense_search(
+    *,
+    index: Any,
+    mapping: dict[int, dict[str, Any]],
+    embedder: OllamaEmbeddings,
+    query_text: str,
+    top_k: int,
+    effective_search_ratio: int,
+    normalize: bool,
+) -> list[dict[str, Any]]:
+    faiss = _import_faiss()
+    np = _import_numpy()
+
+    query_vec = np.asarray(embedder.embed_query(query_text), dtype="float32").reshape(1, -1)
+    if normalize:
+        faiss.normalize_L2(query_vec)
+
+    search_k = max(top_k, top_k * max(1, effective_search_ratio))
+    scores, ids = index.search(query_vec, search_k)
+
+    dense_hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for score, int_id in zip(scores[0], ids[0]):
+        int_id = int(int_id)
+        if int_id < 0:
+            continue
+        row = mapping.get(int_id, {})
+        chunk_id = row.get("chunk_id")
+        if not chunk_id:
+            continue
+        chunk_id_str = str(chunk_id)
+        if chunk_id_str in seen:
+            continue
+        seen.add(chunk_id_str)
+        dense_hits.append(
+            {
+                "chunk_id": chunk_id_str,
+                "dense_score": float(score),
+                "int_id": int_id,
+                "sources": ["dense"],
+            }
+        )
+    return dense_hits
+
+
+def _neo4j_fulltext_search(
+    *,
+    driver: neo4j.Driver,
+    fulltext_index_name: str,
+    query_text: str,
+    top_k: int,
+    database: Optional[str],
+) -> list[dict[str, Any]]:
+    query = """
+    CALL db.index.fulltext.queryNodes($index_name, $query_text) YIELD node, score
+    RETURN coalesce(node.chunk_id, node.id, elementId(node)) AS chunk_id, score
+    ORDER BY score DESC
+    LIMIT $top_k
+    """
+    result = driver.execute_query(
+        query,
+        {
+            "index_name": fulltext_index_name,
+            "query_text": query_text,
+            "top_k": top_k,
+        },
+        database_=database,
+        routing_=neo4j.RoutingControl.READ,
+    )
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in result.records:
+        chunk_id = record.get("chunk_id")
+        if chunk_id is None:
+            continue
+        chunk_id_str = str(chunk_id)
+        if chunk_id_str in seen:
+            continue
+        seen.add(chunk_id_str)
+        hits.append(
+            {
+                "chunk_id": chunk_id_str,
+                "sparse_score": float(record.get("score", 0.0)),
+                "sources": ["sparse"],
+            }
+        )
+    return hits
+
+
+def _fuse_hits_rrf(
+    *,
+    dense_hits: list[dict[str, Any]],
+    sparse_hits: list[dict[str, Any]],
+    top_k: int,
+    rrf_k: int,
+) -> list[dict[str, Any]]:
+    fused: dict[str, dict[str, Any]] = {}
+    for source_name, hits in (("dense", dense_hits), ("sparse", sparse_hits)):
+        for rank, hit in enumerate(hits, start=1):
+            chunk_id = hit["chunk_id"]
+            if chunk_id not in fused:
+                fused[chunk_id] = {
+                    "chunk_id": chunk_id,
+                    "dense_score": hit.get("dense_score"),
+                    "sparse_score": hit.get("sparse_score"),
+                    "fused_score": 0.0,
+                    "sources": [],
+                }
+            row = fused[chunk_id]
+            row["fused_score"] += 1.0 / (rrf_k + rank)
+            if source_name not in row["sources"]:
+                row["sources"].append(source_name)
+            if hit.get("dense_score") is not None:
+                row["dense_score"] = hit["dense_score"]
+            if hit.get("sparse_score") is not None:
+                row["sparse_score"] = hit["sparse_score"]
+
+    return sorted(fused.values(), key=lambda x: x["fused_score"], reverse=True)[:top_k]
+
+
+def _fuse_hits_linear(
+    *,
+    dense_hits: list[dict[str, Any]],
+    sparse_hits: list[dict[str, Any]],
+    top_k: int,
+    alpha: float,
+) -> list[dict[str, Any]]:
+    def normalize(values: list[float]) -> tuple[float, float]:
+        if not values:
+            return (0.0, 0.0)
+        return (min(values), max(values))
+
+    dense_min, dense_max = normalize([x.get("dense_score", 0.0) for x in dense_hits])
+    sparse_min, sparse_max = normalize([x.get("sparse_score", 0.0) for x in sparse_hits])
+
+    def scaled(score: float, lower: float, upper: float) -> float:
+        if upper <= lower:
+            return 1.0 if score > 0 else 0.0
+        return (score - lower) / (upper - lower)
+
+    merged: dict[str, dict[str, Any]] = {}
+    for hit in dense_hits:
+        merged[hit["chunk_id"]] = {
+            "chunk_id": hit["chunk_id"],
+            "dense_score": hit.get("dense_score"),
+            "sparse_score": None,
+            "sources": ["dense"],
+        }
+    for hit in sparse_hits:
+        row = merged.setdefault(
+            hit["chunk_id"],
+            {
+                "chunk_id": hit["chunk_id"],
+                "dense_score": None,
+                "sparse_score": None,
+                "sources": [],
+            },
+        )
+        row["sparse_score"] = hit.get("sparse_score")
+        if "sparse" not in row["sources"]:
+            row["sources"].append("sparse")
+
+    for row in merged.values():
+        d = row.get("dense_score") or 0.0
+        s = row.get("sparse_score") or 0.0
+        d_norm = scaled(float(d), dense_min, dense_max)
+        s_norm = scaled(float(s), sparse_min, sparse_max)
+        row["fused_score"] = alpha * d_norm + (1 - alpha) * s_norm
+
+    return sorted(merged.values(), key=lambda x: x["fused_score"], reverse=True)[:top_k]
+
+
+def _fetch_faiss_context_items(
+    *,
+    driver: neo4j.Driver,
+    chunk_ids: list[str],
+    mode: str,
+    score_by_chunk_id: dict[str, dict[str, Any]],
+    database: Optional[str],
+) -> list[RetrieverResultItem]:
+    if not chunk_ids:
+        return []
+
+    if mode == "rag":
+        query = """
+        UNWIND range(0, size($chunk_ids)-1) AS i
+        WITH i, $chunk_ids[i] AS cid
+        OPTIONAL MATCH (c)
+        WHERE c.chunk_id = cid OR c.id = cid OR elementId(c) = cid
+        RETURN i,
+               coalesce(c.chunk_id, c.id, elementId(c), cid) AS chunk_id,
+               c.text AS text,
+               c.section_name AS section_name,
+               c.chunk_index AS chunk_index
+        ORDER BY i
+        """
+    else:
+        query = """
+        UNWIND range(0, size($chunk_ids)-1) AS i
+        WITH i, $chunk_ids[i] AS cid
+        OPTIONAL MATCH (c)
+        WHERE c.chunk_id = cid OR c.id = cid OR elementId(c) = cid
+        OPTIONAL MATCH (prev)-[:NEXT]->(c)
+        OPTIONAL MATCH (c)-[:NEXT]->(next)
+        OPTIONAL MATCH (c)-[:IN_SECTION]->(sec)
+        OPTIONAL MATCH (c)-[:IN_FORM]->(form_direct)
+        OPTIONAL MATCH (form_from_section)-[:HAS_SECTION]->(sec)
+        WITH i, c, prev, next, sec, coalesce(form_direct, form_from_section) AS form
+        OPTIONAL MATCH (company)-[:FILED]->(form)
+        RETURN i,
+               coalesce(c.chunk_id, c.id, elementId(c), $chunk_ids[i]) AS chunk_id,
+               c.text AS text,
+               prev.text AS prev_text,
+               next.text AS next_text,
+               coalesce(sec.section_name, sec.name, c.section_name) AS section_name,
+               c.chunk_index AS chunk_index,
+               coalesce(form.form_id, form.id, elementId(form)) AS form_id,
+               coalesce(company.company_id, company.ticker, company.name, company.id, elementId(company)) AS company_id
+        ORDER BY i
+        """
+
+    result = driver.execute_query(
+        query,
+        {"chunk_ids": chunk_ids},
+        database_=database,
+        routing_=neo4j.RoutingControl.READ,
+    )
+
+    items: list[RetrieverResultItem] = []
+    for record in result.records:
+        text = record.get("text")
+        if not text:
+            continue
+        chunk_id = str(record.get("chunk_id"))
+        score_info = score_by_chunk_id.get(chunk_id, {})
+        metadata: dict[str, Any] = {"chunk_id": chunk_id}
+        metadata.update(score_info)
+        if record.get("section_name") is not None:
+            metadata["section_name"] = record.get("section_name")
+        if record.get("chunk_index") is not None:
+            metadata["chunk_index"] = record.get("chunk_index")
+
+        if mode == "graphrag":
+            if record.get("form_id") is not None:
+                metadata["form_id"] = record.get("form_id")
+            if record.get("company_id") is not None:
+                metadata["company_id"] = record.get("company_id")
+            prev_text = record.get("prev_text")
+            next_text = record.get("next_text")
+            parts: list[str] = []
+            if prev_text:
+                parts.append(f"[Previous]\n{prev_text}")
+            parts.append(f"[Chunk]\n{text}")
+            if next_text:
+                parts.append(f"[Next]\n{next_text}")
+            content = "\n\n".join(parts)
+        else:
+            content = str(text)
+
+        items.append(RetrieverResultItem(content=content, metadata=metadata))
+
+    return items
+
+
+def _run_faiss_round(
+    *,
+    mode: str,
+    retrieval: str,
+    query_text: str,
+    driver: neo4j.Driver,
+    embedder: OllamaEmbeddings,
+    llm: OllamaLLM,
+    index: Any,
+    mapping: dict[int, dict[str, Any]],
+    database: Optional[str],
+    fulltext_index_name: str,
+    top_k: int,
+    effective_search_ratio: int,
+    hybrid_ranker: str,
+    alpha: Optional[float],
+    normalize: bool,
+    rrf_k: int,
+) -> tuple[str, str, list[RetrieverResultItem], list[str]]:
+    dense_hits = _faiss_dense_search(
+        index=index,
+        mapping=mapping,
+        embedder=embedder,
+        query_text=query_text,
+        top_k=top_k,
+        effective_search_ratio=effective_search_ratio,
+        normalize=normalize,
+    )
+
+    if retrieval == "vector":
+        fused_hits = dense_hits[:top_k]
+        retriever_name = "FaissVectorRetriever"
+    else:
+        sparse_hits = _neo4j_fulltext_search(
+            driver=driver,
+            fulltext_index_name=fulltext_index_name,
+            query_text=query_text,
+            top_k=max(top_k, top_k * max(1, effective_search_ratio)),
+            database=database,
+        )
+        if hybrid_ranker == "linear":
+            fused_hits = _fuse_hits_linear(
+                dense_hits=dense_hits,
+                sparse_hits=sparse_hits,
+                top_k=top_k,
+                alpha=alpha if alpha is not None else 0.5,
+            )
+            retriever_name = "FaissHybridLinearRetriever"
+        else:
+            fused_hits = _fuse_hits_rrf(
+                dense_hits=dense_hits,
+                sparse_hits=sparse_hits,
+                top_k=top_k,
+                rrf_k=rrf_k,
+            )
+            retriever_name = "FaissHybridRRFRetriever"
+
+    selected_chunk_ids = [row["chunk_id"] for row in fused_hits]
+    score_by_chunk_id = {row["chunk_id"]: row for row in fused_hits}
+    items = _fetch_faiss_context_items(
+        driver=driver,
+        chunk_ids=selected_chunk_ids,
+        mode=mode,
+        score_by_chunk_id=score_by_chunk_id,
+        database=database,
+    )
+
+    if not items:
+        return ("No relevant context found.", retriever_name, items, selected_chunk_ids)
+
+    prompt_template = RagTemplate()
+    context = "\n".join(str(item.content) for item in items)
+    prompt = prompt_template.format(query_text=query_text, context=context, examples="")
+    llm_response = llm.invoke(
+        input=prompt,
+        system_instruction=prompt_template.system_instructions,
+    )
+    return (llm_response.content, retriever_name, items, selected_chunk_ids)
+
+
 def _save_results(
     output_path: str,
     output_format: str,
@@ -246,6 +625,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="hybrid",
         help="Retriever family used in the selected mode(s).",
     )
+    parser.add_argument(
+        "--dense-backend",
+        choices=["neo4j", "faiss"],
+        default="neo4j",
+        help="Dense retrieval backend. neo4j uses vector index, faiss uses local FAISS index.",
+    )
     parser.add_argument("--top-k", type=int, default=5, help="Top K to retrieve.")
     parser.add_argument(
         "--effective-search-ratio",
@@ -263,6 +648,29 @@ def _build_parser() -> argparse.ArgumentParser:
         "--alpha",
         type=float,
         help="Weight for vector score when --hybrid-ranker=linear (0..1).",
+    )
+    parser.add_argument(
+        "--faiss-index-path",
+        default=os.environ.get("FAISS_INDEX_PATH", "artifacts/faiss/chunks.index"),
+        help="FAISS index path when --dense-backend=faiss.",
+    )
+    parser.add_argument(
+        "--faiss-mapping-path",
+        default=os.environ.get(
+            "FAISS_MAPPING_PATH", "artifacts/faiss/intid_to_chunkid.jsonl"
+        ),
+        help="FAISS int_id->chunk_id mapping path when --dense-backend=faiss.",
+    )
+    parser.add_argument(
+        "--faiss-no-normalize",
+        action="store_true",
+        help="Disable L2 normalization for query vectors in FAISS mode.",
+    )
+    parser.add_argument(
+        "--faiss-rrf-k",
+        type=int,
+        default=60,
+        help="RRF k constant for --dense-backend=faiss --retrieval=hybrid --hybrid-ranker=naive.",
     )
     parser.add_argument(
         "--output",
@@ -371,29 +779,46 @@ def main() -> None:
     embedder = OllamaEmbeddings(model=args.embedder_model)
 
     try:
+        faiss_index = None
+        faiss_mapping: dict[int, dict[str, Any]] = {}
+        if args.dense_backend == "faiss":
+            faiss = _import_faiss()
+            if not Path(args.faiss_index_path).exists():
+                print(f"FAISS index not found: {args.faiss_index_path}", file=sys.stderr)
+                sys.exit(1)
+            if not Path(args.faiss_mapping_path).exists():
+                print(f"FAISS mapping not found: {args.faiss_mapping_path}", file=sys.stderr)
+                sys.exit(1)
+            faiss_index = faiss.read_index(args.faiss_index_path)
+            faiss_mapping = _load_faiss_mapping(args.faiss_mapping_path)
+
         with neo4j.GraphDatabase.driver(
             args.neo4j_uri, auth=(args.neo4j_user, password)
         ) as driver:
             rag_by_mode: dict[str, GraphRAG] = {}
-            for mode in modes:
-                retriever = _build_retriever(
-                    mode=mode,
-                    retrieval=args.retrieval,
-                    driver=driver,
-                    vector_index_name=args.vector_index,
-                    fulltext_index_name=args.fulltext_index,
-                    embedder=embedder,
-                    retrieval_query=retrieval_query,
-                    database=args.neo4j_database,
-                )
-                rag_by_mode[mode] = GraphRAG(retriever=retriever, llm=llm)
+            if args.dense_backend == "neo4j":
+                for mode in modes:
+                    retriever = _build_retriever(
+                        mode=mode,
+                        retrieval=args.retrieval,
+                        driver=driver,
+                        vector_index_name=args.vector_index,
+                        fulltext_index_name=args.fulltext_index,
+                        embedder=embedder,
+                        retrieval_query=retrieval_query,
+                        database=args.neo4j_database,
+                    )
+                    rag_by_mode[mode] = GraphRAG(retriever=retriever, llm=llm)
 
             total_runs = len(questions) * len(modes)
             done = 0
             for question in questions:
                 for mode in modes:
                     done += 1
-                    print(f"[{done}/{total_runs}] mode={mode} retrieval={args.retrieval} | {question}")
+                    print(
+                        f"[{done}/{total_runs}] mode={mode} retrieval={args.retrieval} "
+                        f"dense_backend={args.dense_backend} | {question}"
+                    )
                     retriever_config: dict[str, Any] = {
                         "top_k": args.top_k,
                         "effective_search_ratio": args.effective_search_ratio,
@@ -410,24 +835,53 @@ def main() -> None:
                     chunk_ids: list[str] = []
                     retriever_name = ""
                     try:
-                        result = rag_by_mode[mode].search(
-                            query_text=question,
-                            retriever_config=retriever_config,
-                            return_context=True,
+                        if args.dense_backend == "neo4j":
+                            result = rag_by_mode[mode].search(
+                                query_text=question,
+                                retriever_config=retriever_config,
+                                return_context=True,
+                            )
+                            answer = result.answer
+                            retriever_result = result.retriever_result
+                            retriever_name = (
+                                (retriever_result.metadata or {}).get("__retriever", "")
+                                if retriever_result
+                                else ""
+                            )
+                            items = retriever_result.items if retriever_result else []
+                            chunk_ids = _extract_chunk_ids(items)
+                            context_preview = _build_context_preview(
+                                items, args.preview_items, args.preview_chars
+                            )
+                        else:
+                            answer, retriever_name, items, selected_ids = _run_faiss_round(
+                                mode=mode,
+                                retrieval=args.retrieval,
+                                query_text=question,
+                                driver=driver,
+                                embedder=embedder,
+                                llm=llm,
+                                index=faiss_index,
+                                mapping=faiss_mapping,
+                                database=args.neo4j_database,
+                                fulltext_index_name=args.fulltext_index,
+                                top_k=args.top_k,
+                                effective_search_ratio=args.effective_search_ratio,
+                                hybrid_ranker=args.hybrid_ranker,
+                                alpha=args.alpha,
+                                normalize=not args.faiss_no_normalize,
+                                rrf_k=args.faiss_rrf_k,
+                            )
+                            chunk_ids = selected_ids
+                            context_preview = _build_context_preview(
+                                items, args.preview_items, args.preview_chars
+                            )
+
+                        print(
+                            f"  answer: {answer[:120]}..."
+                            if answer is not None and len(answer) > 120
+                            else f"  answer: {answer}"
                         )
-                        answer = result.answer
-                        retriever_result = result.retriever_result
-                        retriever_name = (
-                            (retriever_result.metadata or {}).get("__retriever", "")
-                            if retriever_result
-                            else ""
-                        )
-                        items = retriever_result.items if retriever_result else []
-                        chunk_ids = _extract_chunk_ids(items)
-                        context_preview = _build_context_preview(
-                            items, args.preview_items, args.preview_chars
-                        )
-                        print(f"  answer: {answer[:120]}..." if len(answer) > 120 else f"  answer: {answer}")
                     except Exception as exc:
                         error = str(exc)
                         print(f"  error: {error}")
