@@ -93,8 +93,14 @@ class PromptTemplate:
 
 
 class RagTemplate(PromptTemplate):
-    DEFAULT_SYSTEM_INSTRUCTIONS = "Answer the user question using the provided context. Return your answer as JSON."
-    DEFAULT_TEMPLATE = """Context:
+    DEFAULT_SYSTEM_INSTRUCTIONS = (
+        "You are a financial expert. Answer the user question using only the provided context. "
+        "Return your answer as JSON."
+    )
+    DEFAULT_TEMPLATE = """You are a financial expert. Answer the question using only the provided financial context.
+Return JSON only.
+
+Context:
 {context}
 
 Examples:
@@ -103,8 +109,36 @@ Examples:
 Question:
 {query_text}
 
-Answer in JSON format:
-{{"final_answer": "your answer here", "evidence": "relevant text from context"}}
+Type definitions:
+- None: textual/conceptual financial question, no arithmetic required.
+- Subtract: direct difference between two values.
+- Subtraction: subtraction-style trend/difference question.
+- Addition: sum of two or more values.
+- Multiplication: multiplication-based question.
+- Division: division/ratio/average/per-unit question.
+- Compositional: multi-step combined reasoning/calculation/comparison.
+
+Rules:
+1. Identify the question type from the list above.
+2. Use only the provided context; do not use outside knowledge.
+3. Do not invent missing values or facts.
+4. For calculation questions, infer the operation and compute from context values.
+5. If context is insufficient, set answer/evidence to null and explain missing_information clearly.
+6. gold_answer, gold_reference, gold_type:
+   - If provided in input metadata, copy them.
+   - Otherwise set them to null.
+
+Output JSON format:
+{{
+  "question": "{query_text}",
+  "type": "None | Subtract | Subtraction | Addition | Multiplication | Division | Compositional",
+  "answer": "string or null",
+  "evidence": "string or null",
+  "missing_information": "string or null",
+  "gold_answer": "string or null",
+  "gold_reference": "string or null",
+  "gold_type": "string or null"
+}}
 
 JSON:
 """
