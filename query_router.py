@@ -564,7 +564,7 @@ def _fetch_faiss_context_items(
                coalesce(sec.section_name, sec.name, c.section_name) AS section_name,
                c.chunk_index AS chunk_index,
                coalesce(form.form_id, elementId(form)) AS form_id,
-               coalesce(company.company_id, company.ticker, company.name, elementId(company)) AS company_id
+               coalesce(company.company_id, elementId(company)) AS company_id
         ORDER BY i
         """
 
