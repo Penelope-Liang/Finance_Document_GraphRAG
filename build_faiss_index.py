@@ -172,6 +172,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail fast on malformed input rows.",
     )
+    parser.add_argument(
+        "--on-embed-error",
+        choices=["fail", "skip"],
+        default="fail",
+        help="Behavior when embedding generation fails for a chunk.",
+    )
     return parser
 
 
@@ -204,15 +210,40 @@ def main() -> None:
 
     embedder = _create_embedder(args.embedder_backend, args.embedder_model)
     vectors: list[list[float]] = []
+    indexed_rows: list[ChunkRow] = []
+    skipped_embed = 0
     started = time.perf_counter()
     try:
         for i, row in enumerate(rows, start=1):
-            vectors.append(embedder.embed_query(row.text))
+            try:
+                vector = embedder.embed_query(row.text)
+                vector_arr = np.asarray(vector, dtype="float32")
+                if vector_arr.ndim != 1:
+                    raise ValueError(f"invalid embedding shape: {vector_arr.shape}")
+                if not np.isfinite(vector_arr).all():
+                    raise ValueError("embedding contains non-finite values (NaN/Inf)")
+            except Exception as exc:
+                skipped_embed += 1
+                message = (
+                    f"[warn] embed failed at {i}/{len(rows)} "
+                    f"chunk_id={row.chunk_id}: {exc}"
+                )
+                if args.on_embed_error == "skip":
+                    print(message, file=sys.stderr)
+                    continue
+                raise
+
+            vectors.append(vector_arr.tolist())
+            indexed_rows.append(row)
             if args.progress_every > 0 and i % args.progress_every == 0:
                 elapsed = time.perf_counter() - started
                 print(f"  embedded {i}/{len(rows)} chunks ({elapsed:.1f}s)")
     finally:
         _close_embedder(embedder)
+
+    if not indexed_rows:
+        print("No vectors indexed (all embeddings failed).", file=sys.stderr)
+        sys.exit(1)
 
     matrix = np.asarray(vectors, dtype="float32")
     if matrix.ndim != 2:
@@ -245,7 +276,7 @@ def main() -> None:
 
     faiss.write_index(index, str(index_out))
     with mapping_out.open("w", encoding="utf-8") as f:
-        for int_id, row in enumerate(rows):
+        for int_id, row in enumerate(indexed_rows):
             payload = {
                 "int_id": int_id,
                 "chunk_id": row.chunk_id,
@@ -261,7 +292,9 @@ def main() -> None:
         "chunks_path": str(chunks_path),
         "index_path": str(index_out),
         "mapping_path": str(mapping_out),
-        "count": len(rows),
+        "count_input": len(rows),
+        "count_indexed": len(indexed_rows),
+        "count_skipped_embed_error": skipped_embed,
         "dimension": dim,
         "embedder_backend": args.embedder_backend,
         "embedder_model": args.embedder_model,
@@ -275,7 +308,10 @@ def main() -> None:
     print(f"Index:   {index_out}")
     print(f"Mapping: {mapping_out}")
     print(f"Meta:    {meta_out}")
-    print(f"Vectors: {len(rows)} | dim={dim} | elapsed={elapsed:.1f}s")
+    print(
+        f"Vectors indexed: {len(indexed_rows)}/{len(rows)} "
+        f"(skipped={skipped_embed}) | dim={dim} | elapsed={elapsed:.1f}s"
+    )
 
 
 if __name__ == "__main__":

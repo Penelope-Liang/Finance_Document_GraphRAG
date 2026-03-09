@@ -35,7 +35,7 @@ WITH chunk, score, collect(DISTINCT {
 }) AS entities
 RETURN chunk.text AS text,
        score AS similarity_score,
-       coalesce(chunk.chunk_id, chunk.id, elementId(chunk)) AS chunk_id,
+       coalesce(chunk.chunk_id, elementId(chunk)) AS chunk_id,
        entities
 """
 
@@ -402,7 +402,7 @@ def _neo4j_fulltext_search(
 ) -> list[dict[str, Any]]:
     query = """
     CALL db.index.fulltext.queryNodes($index_name, $query_text) YIELD node, score
-    RETURN coalesce(node.chunk_id, node.id, elementId(node)) AS chunk_id, score
+    RETURN coalesce(node.chunk_id, elementId(node)) AS chunk_id, score
     ORDER BY score DESC
     LIMIT $top_k
     """
@@ -535,9 +535,9 @@ def _fetch_faiss_context_items(
         UNWIND range(0, size($chunk_ids)-1) AS i
         WITH i, $chunk_ids[i] AS cid
         OPTIONAL MATCH (c)
-        WHERE c.chunk_id = cid OR c.id = cid OR elementId(c) = cid
+        WHERE c.chunk_id = cid OR elementId(c) = cid
         RETURN i,
-               coalesce(c.chunk_id, c.id, elementId(c), cid) AS chunk_id,
+               coalesce(c.chunk_id, elementId(c), cid) AS chunk_id,
                c.text AS text,
                c.section_name AS section_name,
                c.chunk_index AS chunk_index
@@ -548,7 +548,7 @@ def _fetch_faiss_context_items(
         UNWIND range(0, size($chunk_ids)-1) AS i
         WITH i, $chunk_ids[i] AS cid
         OPTIONAL MATCH (c)
-        WHERE c.chunk_id = cid OR c.id = cid OR elementId(c) = cid
+        WHERE c.chunk_id = cid OR elementId(c) = cid
         OPTIONAL MATCH (prev)-[:NEXT]->(c)
         OPTIONAL MATCH (c)-[:NEXT]->(next)
         OPTIONAL MATCH (c)-[:IN_SECTION]->(sec)
@@ -557,14 +557,14 @@ def _fetch_faiss_context_items(
         WITH i, c, prev, next, sec, coalesce(form_direct, form_from_section) AS form
         OPTIONAL MATCH (company)-[:FILED]->(form)
         RETURN i,
-               coalesce(c.chunk_id, c.id, elementId(c), $chunk_ids[i]) AS chunk_id,
+               coalesce(c.chunk_id, elementId(c), $chunk_ids[i]) AS chunk_id,
                c.text AS text,
                prev.text AS prev_text,
                next.text AS next_text,
                coalesce(sec.section_name, sec.name, c.section_name) AS section_name,
                c.chunk_index AS chunk_index,
-               coalesce(form.form_id, form.id, elementId(form)) AS form_id,
-               coalesce(company.company_id, company.ticker, company.name, company.id, elementId(company)) AS company_id
+               coalesce(form.form_id, elementId(form)) AS form_id,
+               coalesce(company.company_id, company.ticker, company.name, elementId(company)) AS company_id
         ORDER BY i
         """
 
