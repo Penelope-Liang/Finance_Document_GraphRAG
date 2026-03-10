@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import types
 from inspect import signature
 from pathlib import Path
 from typing import Any
@@ -214,6 +215,62 @@ def _ensure_metric_instance(metric_obj: Any) -> Any:
         return metric_obj
 
 
+def _coerce_metric_object(metric_obj: Any, llm: Any, embeddings: Any) -> Any:
+    """Best-effort conversion from metric symbols/factories/classes to initialized metric objects."""
+    # Already an instance-like metric
+    if hasattr(metric_obj, "single_turn_ascore") or hasattr(metric_obj, "ascore"):
+        return metric_obj
+
+    # Module exported by some ragas versions (rare)
+    if isinstance(metric_obj, types.ModuleType):
+        for attr in (
+            "metric",
+            "Metric",
+            "instance",
+            "Faithfulness",
+            "AnswerRelevancy",
+            "ResponseRelevancy",
+            "ContextPrecision",
+            "ContextRecall",
+            "LLMContextPrecisionWithReference",
+            "LLMContextRecall",
+        ):
+            candidate = getattr(metric_obj, attr, None)
+            if candidate is not None:
+                materialized = _coerce_metric_object(candidate, llm, embeddings)
+                if hasattr(materialized, "single_turn_ascore") or hasattr(materialized, "ascore"):
+                    return materialized
+        return metric_obj
+
+    if callable(metric_obj):
+        try:
+            params = signature(metric_obj).parameters
+        except Exception:
+            params = {}
+
+        attempts: list[dict[str, Any]] = [{}]
+        if "llm" in params and "embeddings" in params:
+            attempts.append({"llm": llm, "embeddings": embeddings})
+        if "llm" in params:
+            attempts.append({"llm": llm})
+        if "embeddings" in params:
+            attempts.append({"embeddings": embeddings})
+
+        for kwargs in attempts:
+            try:
+                obj = metric_obj(**kwargs)
+                if hasattr(obj, "single_turn_ascore") or hasattr(obj, "ascore"):
+                    return obj
+            except Exception:
+                continue
+
+    return metric_obj
+
+
+def _materialize_metrics(metrics: list[Any], llm: Any, embeddings: Any) -> list[Any]:
+    return [_coerce_metric_object(m, llm, embeddings) for m in metrics]
+
+
 def _normalize_openai_base_url(ollama_base_url: str) -> str:
     base = ollama_base_url.rstrip("/")
     if not base.endswith("/v1"):
@@ -367,12 +424,35 @@ def main() -> None:
             continue
 
         ds = Dataset.from_list(eval_rows)
-        result = evaluate(
-            ds,
-            metrics=metrics,
-            llm=llm,
-            embeddings=embeddings,
-        )
+        try:
+            result = evaluate(
+                ds,
+                metrics=metrics,
+                llm=llm,
+                embeddings=embeddings,
+            )
+        except TypeError as exc:
+            if "initialised metric objects" not in str(exc):
+                raise
+            print("[warn] RAGAS requires initialized metrics. Retrying with materialized metrics...")
+            metrics_materialized = _materialize_metrics(metrics, llm, embeddings)
+            try:
+                result = evaluate(
+                    ds,
+                    metrics=metrics_materialized,
+                    llm=llm,
+                    embeddings=embeddings,
+                )
+                metrics = metrics_materialized
+            except TypeError as exc2:
+                if "initialised metric objects" not in str(exc2):
+                    raise
+                print("[warn] Metrics still rejected; retrying with RAGAS default metric set.")
+                result = evaluate(
+                    ds,
+                    llm=llm,
+                    embeddings=embeddings,
+                )
 
         scores = _result_to_dict(result)
         mode_summary = {
