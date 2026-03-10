@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,11 @@ def parse_args() -> argparse.Namespace:
         "--ollama-base-url",
         default="http://127.0.0.1:11434",
         help="Ollama base URL.",
+    )
+    parser.add_argument(
+        "--ollama-api-key",
+        default="ollama",
+        help="API key for Ollama OpenAI-compatible endpoint (any non-empty string is typically accepted).",
     )
     parser.add_argument(
         "--llm-model",
@@ -197,20 +203,106 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
     return {"result": str(result)}
 
 
+def _normalize_openai_base_url(ollama_base_url: str) -> str:
+    base = ollama_base_url.rstrip("/")
+    if not base.endswith("/v1"):
+        return f"{base}/v1"
+    return base
+
+
+def _call_with_supported_kwargs(factory: Any, kwargs: dict[str, Any], positional: tuple[Any, ...]) -> Any:
+    """Call a factory by dropping unknown kwargs based on its signature."""
+    params = signature(factory).parameters
+    filtered = {k: v for k, v in kwargs.items() if k in params}
+    return factory(*positional, **filtered)
+
+
+def _build_ragas_runtime(args: argparse.Namespace) -> tuple[Any, Any, str]:
+    """Build (llm, embeddings, backend_name) with modern API first, fallback to legacy wrappers."""
+    # Modern path: ragas factories + OpenAI-compatible client pointed to Ollama
+    try:
+        from openai import OpenAI
+        from ragas.embeddings import embedding_factory
+        from ragas.llms import llm_factory
+
+        client = OpenAI(
+            base_url=_normalize_openai_base_url(args.ollama_base_url),
+            api_key=args.ollama_api_key,
+        )
+
+        llm = None
+        llm_attempts = (
+            ((), {"model": args.llm_model, "provider": "openai", "client": client}),
+            ((args.llm_model,), {"provider": "openai", "client": client}),
+            ((args.llm_model,), {"client": client}),
+            ((), {"model": args.llm_model, "client": client}),
+        )
+        for pos_args, kwargs in llm_attempts:
+            try:
+                llm = _call_with_supported_kwargs(llm_factory, kwargs, pos_args)
+                break
+            except Exception:
+                continue
+        if llm is None:
+            raise RuntimeError("Unable to initialize llm_factory for Ollama/OpenAI-compatible endpoint.")
+
+        embeddings = None
+        emb_attempts = (
+            ((), {"provider": "openai", "model": args.embed_model, "client": client}),
+            ((args.embed_model,), {"provider": "openai", "client": client}),
+            ((args.embed_model,), {"client": client}),
+            ((), {"model": args.embed_model, "client": client}),
+        )
+        for pos_args, kwargs in emb_attempts:
+            try:
+                embeddings = _call_with_supported_kwargs(embedding_factory, kwargs, pos_args)
+                break
+            except Exception:
+                continue
+        if embeddings is None:
+            raise RuntimeError("Unable to initialize embedding_factory for Ollama/OpenAI-compatible endpoint.")
+
+        return llm, embeddings, "factory-openai-compat"
+    except Exception:
+        pass
+
+    # Legacy fallback path
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+    from ragas.llms import LangchainLLMWrapper
+    from langchain_ollama import ChatOllama, OllamaEmbeddings
+
+    llm = LangchainLLMWrapper(
+        ChatOllama(
+            model=args.llm_model,
+            temperature=0,
+            base_url=args.ollama_base_url,
+        )
+    )
+    embeddings = LangchainEmbeddingsWrapper(
+        OllamaEmbeddings(model=args.embed_model, base_url=args.ollama_base_url)
+    )
+    return llm, embeddings, "langchain-wrapper-fallback"
+
+
 def main() -> None:
     args = parse_args()
 
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.embeddings import LangchainEmbeddingsWrapper
-        from ragas.llms import LangchainLLMWrapper
-        from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
-        from langchain_ollama import ChatOllama, OllamaEmbeddings
+        try:
+            from ragas.metrics.collections import (
+                answer_relevancy,
+                context_precision,
+                context_recall,
+                faithfulness,
+            )
+        except ImportError:
+            from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
     except ImportError as exc:
         raise ImportError(
             "Missing dependency. Install with: "
-            "python3 -m pip install ragas langchain-ollama datasets pandas"
+            "python3 -m pip install ragas langchain-ollama datasets pandas openai"
         ) from exc
 
     pred_path = Path(args.pred_path)
@@ -225,16 +317,8 @@ def main() -> None:
     qa_rows = _read_jsonl(qa_path)
     gold_by_question = _build_gold_index(qa_rows)
 
-    llm = LangchainLLMWrapper(
-        ChatOllama(
-            model=args.llm_model,
-            temperature=0,
-            base_url=args.ollama_base_url,
-        )
-    )
-    embeddings = LangchainEmbeddingsWrapper(
-        OllamaEmbeddings(model=args.embed_model, base_url=args.ollama_base_url)
-    )
+    llm, embeddings, runtime_backend = _build_ragas_runtime(args)
+    print(f"[runtime] backend={runtime_backend} llm={args.llm_model} embed={args.embed_model}")
 
     metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
 
@@ -242,8 +326,10 @@ def main() -> None:
         "pred_path": str(pred_path),
         "qa_path": str(qa_path),
         "ollama_base_url": args.ollama_base_url,
+        "ollama_api_key": "***" if args.ollama_api_key else "",
         "llm_model": args.llm_model,
         "embed_model": args.embed_model,
+        "runtime_backend": runtime_backend,
         "modes": {},
     }
 
