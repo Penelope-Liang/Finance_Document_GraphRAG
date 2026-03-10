@@ -203,6 +203,17 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
     return {"result": str(result)}
 
 
+def _ensure_metric_instance(metric_obj: Any) -> Any:
+    """Return an initialized metric object across ragas versions."""
+    # Newer/older versions may export metric classes, factory callables, or instances.
+    if hasattr(metric_obj, "single_turn_ascore") or hasattr(metric_obj, "ascore"):
+        return metric_obj
+    try:
+        return metric_obj()
+    except Exception:
+        return metric_obj
+
+
 def _normalize_openai_base_url(ollama_base_url: str) -> str:
     base = ollama_base_url.rstrip("/")
     if not base.endswith("/v1"):
@@ -320,7 +331,12 @@ def main() -> None:
     llm, embeddings, runtime_backend = _build_ragas_runtime(args)
     print(f"[runtime] backend={runtime_backend} llm={args.llm_model} embed={args.embed_model}")
 
-    metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
+    metrics = [
+        _ensure_metric_instance(faithfulness),
+        _ensure_metric_instance(answer_relevancy),
+        _ensure_metric_instance(context_precision),
+        _ensure_metric_instance(context_recall),
+    ]
 
     global_summary: dict[str, Any] = {
         "pred_path": str(pred_path),
