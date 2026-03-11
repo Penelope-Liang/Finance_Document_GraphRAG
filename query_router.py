@@ -30,8 +30,8 @@ DEFAULT_CYPHER_RETRIEVAL_QUERY = """
 WITH node AS chunk, score
 OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
 WITH chunk, score, collect(DISTINCT {
-    label: labels(entity)[1],
-    name: entity.name
+    label: coalesce(entity.type, head(labels(entity))),
+    name: coalesce(entity.title, entity.name, elementId(entity))
 }) AS entities
 RETURN chunk.text AS text,
        score AS similarity_score,
@@ -554,7 +554,9 @@ def _fetch_faiss_context_items(
         OPTIONAL MATCH (c)-[:IN_SECTION]->(sec)
         OPTIONAL MATCH (c)-[:IN_FORM]->(form_direct)
         OPTIONAL MATCH (form_from_section)-[:HAS_SECTION]->(sec)
-        WITH i, c, prev, next, sec, coalesce(form_direct, form_from_section) AS form
+        OPTIONAL MATCH (c)<-[:FROM_CHUNK]-(entity:Entity)
+        WITH i, c, prev, next, sec, coalesce(form_direct, form_from_section) AS form,
+             collect(DISTINCT coalesce(entity.title, entity.name, elementId(entity)))[0..20] AS entities
         OPTIONAL MATCH (company)-[:FILED]->(form)
         RETURN i,
                coalesce(c.chunk_id, elementId(c), $chunk_ids[i]) AS chunk_id,
@@ -563,6 +565,7 @@ def _fetch_faiss_context_items(
                next.text AS next_text,
                coalesce(sec.section_name, sec.name, c.section_name) AS section_name,
                c.chunk_index AS chunk_index,
+               entities,
                coalesce(form.form_id, elementId(form)) AS form_id,
                coalesce(company.company_id, elementId(company)) AS company_id
         ORDER BY i
@@ -594,11 +597,16 @@ def _fetch_faiss_context_items(
                 metadata["form_id"] = record.get("form_id")
             if record.get("company_id") is not None:
                 metadata["company_id"] = record.get("company_id")
+            if record.get("entities") is not None:
+                metadata["entities"] = record.get("entities")
             prev_text = record.get("prev_text")
             next_text = record.get("next_text")
+            entity_names = record.get("entities") or []
             parts: list[str] = []
             if prev_text:
                 parts.append(f"[Previous]\n{prev_text}")
+            if entity_names:
+                parts.append("[Entities]\n" + ", ".join(str(x) for x in entity_names))
             parts.append(f"[Chunk]\n{text}")
             if next_text:
                 parts.append(f"[Next]\n{next_text}")

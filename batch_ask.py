@@ -64,8 +64,8 @@ def main() -> None:
     WITH node AS chunk, score
     OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
     WITH chunk, score, collect(DISTINCT {
-        label: labels(entity)[1],
-        name: entity.name
+        label: coalesce(entity.type, head(labels(entity))),
+        name: coalesce(entity.title, entity.name, elementId(entity))
     }) AS entities
     RETURN chunk.text AS text,
            score AS similarity_score,
