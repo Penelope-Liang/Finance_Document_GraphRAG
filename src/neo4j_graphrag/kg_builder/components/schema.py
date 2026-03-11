@@ -47,7 +47,7 @@ from neo4j_graphrag.kg_builder.pipeline.types.schema import (
 from neo4j_graphrag.rag import SchemaExtractionTemplate, PromptTemplate
 from neo4j_graphrag.llm import LLMInterface
 from neo4j_graphrag.utils.file_handler import FileHandler, FileFormat
-from neo4j_graphrag.schema import get_structured_schema
+from neo4j_graphrag.graph_schema import get_structured_schema
 
 
 logger = logging.getLogger(__name__)

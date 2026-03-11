@@ -7,7 +7,7 @@ environment for this example to run.
 import neo4j
 from neo4j_graphrag.llm import OpenAILLM
 from neo4j_graphrag.retrievers import Text2CypherRetriever
-from neo4j_graphrag.schema import get_schema
+from neo4j_graphrag.graph_schema import get_schema
 
 # Define database credentials
 URI = "neo4j+s://demo.neo4jlabs.com"

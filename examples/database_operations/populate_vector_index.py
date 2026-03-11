@@ -1,5 +1,5 @@
 import neo4j
-from neo4j_graphrag.indexes import upsert_vector
+from neo4j_graphrag.neo4j_indexes import upsert_vector
 
 NEO4J_URL = "neo4j://localhost:7687"
 NEO4J_AUTH = ("neo4j", "password")

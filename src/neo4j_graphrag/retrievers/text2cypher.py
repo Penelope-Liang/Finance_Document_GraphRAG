@@ -31,7 +31,7 @@ from neo4j_graphrag.exceptions import (
 from neo4j_graphrag.rag.prompts import Text2CypherTemplate
 from neo4j_graphrag.llm import LLMInterface
 from neo4j_graphrag.retrievers.base import Retriever
-from neo4j_graphrag.schema import get_schema
+from neo4j_graphrag.graph_schema import get_schema
 from neo4j_graphrag.types import (
     LLMModel,
     Neo4jDriverModel,

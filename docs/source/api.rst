@@ -430,33 +430,33 @@ Database Interaction
 
 .. _create-vector-index:
 
-.. autofunction:: neo4j_graphrag.indexes.create_vector_index
+.. autofunction:: neo4j_graphrag.neo4j_indexes.create_vector_index
 
 .. _create-fulltext-index:
 
-.. autofunction:: neo4j_graphrag.indexes.create_fulltext_index
+.. autofunction:: neo4j_graphrag.neo4j_indexes.create_fulltext_index
 
-.. autofunction:: neo4j_graphrag.indexes.drop_index_if_exists
+.. autofunction:: neo4j_graphrag.neo4j_indexes.drop_index_if_exists
 
-.. autofunction:: neo4j_graphrag.indexes.upsert_vectors
+.. autofunction:: neo4j_graphrag.neo4j_indexes.upsert_vectors
 
-.. autofunction:: neo4j_graphrag.indexes.upsert_vector
+.. autofunction:: neo4j_graphrag.neo4j_indexes.upsert_vector
 
-.. autofunction:: neo4j_graphrag.indexes.upsert_vector_on_relationship
+.. autofunction:: neo4j_graphrag.neo4j_indexes.upsert_vector_on_relationship
 
-.. autofunction:: neo4j_graphrag.indexes.async_upsert_vector
+.. autofunction:: neo4j_graphrag.neo4j_indexes.async_upsert_vector
 
-.. autofunction:: neo4j_graphrag.indexes.async_upsert_vector_on_relationship
+.. autofunction:: neo4j_graphrag.neo4j_indexes.async_upsert_vector_on_relationship
 
-.. autofunction:: neo4j_graphrag.indexes.retrieve_vector_index_info
+.. autofunction:: neo4j_graphrag.neo4j_indexes.retrieve_vector_index_info
 
-.. autofunction:: neo4j_graphrag.indexes.retrieve_fulltext_index_info
+.. autofunction:: neo4j_graphrag.neo4j_indexes.retrieve_fulltext_index_info
 
-.. autofunction:: neo4j_graphrag.schema.get_structured_schema
+.. autofunction:: neo4j_graphrag.graph_schema.get_structured_schema
 
-.. autofunction:: neo4j_graphrag.schema.get_schema
+.. autofunction:: neo4j_graphrag.graph_schema.get_schema
 
-.. autofunction:: neo4j_graphrag.schema.format_schema
+.. autofunction:: neo4j_graphrag.graph_schema.format_schema
 
 
 ***************

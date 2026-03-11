@@ -59,14 +59,14 @@ def _run_step(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run full pipeline: ingest_chunks -> build_graph -> build_faiss_index -> "
-            "query preflight -> query compare."
+            "Run full pipeline: preprocess.ingest_chunks -> build_graph -> "
+            "dense_retrieval.faiss_builder -> query preflight -> query compare."
         )
     )
     parser.add_argument(
         "--input-path",
         default="dataset/10k",
-        help="Input path for ingest_chunks.py.",
+        help="Input path for preprocess.ingest_chunks.",
     )
     parser.add_argument(
         "--unstructured-chunking",
@@ -76,8 +76,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-root",
-        default="artifacts",
-        help="Root directory for run artifacts.",
+        default="output",
+        help="Root directory for run output.",
     )
     parser.add_argument(
         "--run-id",
@@ -92,12 +92,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--embedder-backend",
         choices=["sentence-transformers", "ollama"],
         default="sentence-transformers",
-        help="Embedder backend for build_faiss_index.py.",
+        help="Embedder backend for dense_retrieval.faiss_builder.",
     )
     parser.add_argument(
         "--embedder-model",
         default="BAAI/bge-m3",
-        help="Embedder model for build_faiss_index.py.",
+        help="Embedder model for dense_retrieval.faiss_builder.",
     )
     parser.add_argument(
         "--retrieval",
@@ -109,12 +109,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=["rag", "graphrag", "compare"],
         default="compare",
-        help="Mode for query_router.py.",
+        help="Mode for query.router.",
     )
     parser.add_argument(
         "--skip-query",
         action="store_true",
-        help="Skip compare query step (only build artifacts).",
+        help="Skip compare query step (only build output).",
     )
     parser.add_argument(
         "--question",
@@ -166,8 +166,8 @@ def main() -> None:
             _run_step(
                 name="ingest_chunks",
                 cmd=[
-                    py,
-                    "ingest_chunks.py",
+                    py, "-m",
+                    "neo4j_graphrag.preprocess.ingest_chunks",
                     "--input-path",
                     args.input_path,
                     "--output",
@@ -185,8 +185,8 @@ def main() -> None:
             _run_step(
                 name="build_graph",
                 cmd=[
-                    py,
-                    "build_graph.py",
+                    py, "-m",
+                    "neo4j_graphrag.tools.build_graph",
                     "--chunks-path",
                     str(chunks_path),
                     "--state-path",
@@ -202,8 +202,8 @@ def main() -> None:
             _run_step(
                 name="build_faiss_index",
                 cmd=[
-                    py,
-                    "build_faiss_index.py",
+                    py, "-m",
+                    "neo4j_graphrag.dense_retrieval.faiss_builder",
                     "--chunks-path",
                     str(chunks_path),
                     "--index-out",
@@ -227,8 +227,8 @@ def main() -> None:
             _run_step(
                 name="preflight",
                 cmd=[
-                    py,
-                    "query_router.py",
+                    py, "-m",
+                    "neo4j_graphrag.query.router",
                     "--preflight-only",
                     "--mode",
                     "rag",
@@ -248,9 +248,20 @@ def main() -> None:
         )
 
         if not args.skip_query:
+            resolved_questions_file: Path | None = None
+            if not args.question:
+                resolved_questions_file = Path(args.questions_file).expanduser()
+                if not resolved_questions_file.is_absolute():
+                    resolved_questions_file = (repo_root / resolved_questions_file).resolve()
+                if not resolved_questions_file.exists():
+                    raise FileNotFoundError(
+                        "Query step requires question input. "
+                        f"File not found: {resolved_questions_file}. "
+                        "Provide --question or a valid --questions-file."
+                    )
             query_cmd = [
-                py,
-                "query_router.py",
+                py, "-m",
+                "neo4j_graphrag.query.router",
                 "--mode",
                 args.mode,
                 "--retrieval",
@@ -267,7 +278,12 @@ def main() -> None:
             if args.question:
                 query_cmd.extend(["-q", args.question])
             else:
-                query_cmd.extend(["--questions-file", args.questions_file])
+                query_cmd.extend(
+                    [
+                        "--questions-file",
+                        str(resolved_questions_file if resolved_questions_file else args.questions_file),
+                    ]
+                )
 
             steps.append(
                 _run_step(
@@ -314,4 +330,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

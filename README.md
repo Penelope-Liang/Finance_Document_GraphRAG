@@ -163,7 +163,7 @@ When creating a vector index, make sure you match the number of dimensions in th
 
 ```python
 from neo4j import GraphDatabase
-from neo4j_graphrag.indexes import create_vector_index
+from neo4j_graphrag.neo4j_indexes import create_vector_index
 
 NEO4J_URI = "neo4j://localhost:7687"
 NEO4J_USERNAME = "neo4j"
@@ -195,7 +195,7 @@ Ensure that your vector index is created prior to executing this example.
 ```python
 from neo4j import GraphDatabase
 from neo4j_graphrag.embeddings import OpenAIEmbeddings
-from neo4j_graphrag.indexes import upsert_vectors
+from neo4j_graphrag.neo4j_indexes import upsert_vectors
 from neo4j_graphrag.types import EntityType
 
 NEO4J_URI = "neo4j://localhost:7687"

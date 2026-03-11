@@ -1061,7 +1061,7 @@ Create a Vector Index
 .. code:: python
 
     from neo4j import GraphDatabase
-    from neo4j_graphrag.indexes import create_vector_index
+    from neo4j_graphrag.neo4j_indexes import create_vector_index
 
     URI = "neo4j://localhost:7687"
     AUTH = ("neo4j", "password")
@@ -1091,7 +1091,7 @@ Populate a Vector Index
     from random import random
 
     from neo4j import GraphDatabase
-    from neo4j_graphrag.indexes import upsert_vectors
+    from neo4j_graphrag.neo4j_indexes import upsert_vectors
     from neo4j_graphrag.types import EntityType
 
     URI = "neo4j://localhost:7687"

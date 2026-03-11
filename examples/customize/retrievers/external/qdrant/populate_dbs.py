@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 import neo4j
 from neo4j import GraphDatabase
-from neo4j_graphrag.indexes import create_vector_index, drop_index_if_exists
+from neo4j_graphrag.neo4j_indexes import create_vector_index, drop_index_if_exists
 
 try:
     from qdrant_client import QdrantClient, models
