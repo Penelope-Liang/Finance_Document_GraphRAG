@@ -65,13 +65,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--input-path",
-        default="dataset/10k",
+        default="dataset/financebench/pdfs",
         help="Input path for preprocess.ingest_chunks.",
     )
     parser.add_argument(
         "--unstructured-chunking",
         choices=["by_title", "basic", "item10k"],
-        default="item10k",
+        default="by_title",
         help="Chunking strategy for unstructured route.",
     )
     parser.add_argument(
