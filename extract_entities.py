@@ -14,16 +14,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent
-DEFAULT_PROMPT_MODULE = (
-    REPO_ROOT
-    / "entity_extraction_files"
-    / "packages"
-    / "graphrag"
-    / "graphrag"
-    / "prompts"
-    / "index"
-    / "extract_graph.py"
-)
+DEFAULT_PROMPT_MODULE = REPO_ROOT / "entity_extraction_prompt.py"
 DEFAULT_TUPLE_DELIMITER = "<|>"
 DEFAULT_RECORD_DELIMITER = "##"
 DEFAULT_COMPLETION_DELIMITER = "<|COMPLETE|>"
