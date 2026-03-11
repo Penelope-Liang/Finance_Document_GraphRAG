@@ -169,7 +169,15 @@ def main() -> None:
     reference_key = _pick_key(
         sample_row,
         user_value=args.reference_key,
-        candidates=["references", "reference", "evidence", "gold_reference", "context", "source"],
+        candidates=[
+            "references",
+            "reference",
+            "evidence",
+            "gold_evidence",
+            "gold_reference",
+            "context",
+            "source",
+        ],
     )
     type_key = _pick_key(
         sample_row,
@@ -211,7 +219,7 @@ def main() -> None:
                 "_id": _as_text(row.get(id_key)).strip() or f"{split_name}-{total_rows}",
                 "question": question,
                 "gold_answer": row.get(answer_key) if answer_key else None,
-                "gold_reference": row.get(reference_key) if reference_key else None,
+                "gold_evidence": row.get(reference_key) if reference_key else None,
                 "gold_type": row.get(type_key) if type_key else None,
                 "category": row.get(category_key) if category_key else None,
                 "reasoning": row.get(reasoning_key) if reasoning_key else None,
