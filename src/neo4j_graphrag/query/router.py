@@ -40,6 +40,16 @@ RETURN chunk.text AS text,
 """
 
 
+def _format_duration_minsec(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}h {minutes}min {secs:.1f}s"
+    return f"{minutes}min {secs:.1f}s"
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -720,7 +730,8 @@ def _save_results(
         "retrieval",
         "question",
         "answer",
-        "latency_ms",
+        "latency",
+        "latency_seconds",
         "retriever",
         "retrieved_chunk_ids",
         "context_preview",
@@ -1035,21 +1046,23 @@ def main() -> None:
                         error = str(exc)
                         print(f"  error: {error}")
 
-                    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+                    latency_seconds = round(time.perf_counter() - start, 2)
+                    latency = _format_duration_minsec(latency_seconds)
                     run_rows.append(
                         {
                             "mode": mode,
                             "retrieval": args.retrieval,
                             "question": question,
                             "answer": answer,
-                            "latency_ms": latency_ms,
+                            "latency": latency,
+                            "latency_seconds": latency_seconds,
                             "retriever": retriever_name,
                             "retrieved_chunk_ids": chunk_ids,
                             "context_preview": context_preview,
                             "error": error,
                         }
                     )
-                    print(f"  latency_ms: {latency_ms}")
+                    print(f"  latency: {latency}")
 
     finally:
         if llm is not None and hasattr(llm, "client") and hasattr(llm.client, "_client"):

@@ -94,10 +94,10 @@ class PromptTemplate:
 
 class RagTemplate(PromptTemplate):
     DEFAULT_SYSTEM_INSTRUCTIONS = (
-        "You are a financial expert. Answer the user question using only the provided context. "
-        "Return your answer as JSON."
+        "You are a financial QA expert. Answer the user question using only the provided "
+        "financial context. Return JSON only."
     )
-    DEFAULT_TEMPLATE = """You are a financial expert. Answer the question using only the provided financial context.
+    DEFAULT_TEMPLATE = """You are a financial QA expert. Answer the question using only the provided financial context.
 Return JSON only.
 
 Context:
@@ -109,29 +109,41 @@ Examples:
 Question:
 {query_text}
 
-Type definitions:
-- None: textual/conceptual financial question, no arithmetic required.
-- Subtract: direct difference between two values.
-- Subtraction: subtraction-style trend/difference question.
-- Addition: sum of two or more values.
-- Multiplication: multiplication-based question.
-- Division: division/ratio/average/per-unit question.
-- Compositional: multi-step combined reasoning/calculation/comparison.
+Question type taxonomy (FinanceBench):
+1) metrics-generated
+- Meaning: asks for specific financial figures/metrics from statements, or direct numeric computation based on those figures.
+- Example: "What is the FY2018 capital expenditure amount (in USD millions) for 3M?"
+
+2) domain-relevant
+- Meaning: asks for business/industry interpretation grounded in financial information, not only raw number extraction.
+- Example: "Is 3M a capital-intensive business based on FY2022 data?"
+
+3) novel-generated
+- Meaning: open-ended, multi-step, cross-section or cross-period analytical reasoning.
+- Example: "If we exclude the impact of M&A, which segment has dragged down 3M's overall growth in 2022?"
 
 Rules:
-1. Identify the question type from the list above.
+1. First infer the question_type from the taxonomy above.
 2. Use only the provided context; do not use outside knowledge.
 3. Do not invent missing values or facts.
-4. For calculation questions, infer the operation and compute from context values.
-5. If context is insufficient, set answer/evidence to null and explain missing_information clearly.
-6. gold_answer, gold_reference, gold_type:
-   - If provided in input metadata, copy them.
-   - Otherwise set them to null.
+4. For metrics-generated questions:
+   - extract exact numbers from context;
+   - if calculation is needed, compute from extracted values.
+5. For domain-relevant / novel-generated questions:
+   - provide concise reasoning grounded in evidence from context.
+6. If context is insufficient:
+   - set "answer" to null,
+   - set "evidence" to null,
+   - explain the exact missing data in "missing_information" (e.g., missing year/metric/table line).
+7. gold_answer, gold_reference, gold_type:
+   - if available in input metadata, copy them;
+   - otherwise set them to null.
+8. Output must be valid JSON only (no markdown, no extra text).
 
 Output JSON format:
 {{
   "question": "{query_text}",
-  "type": "None | Subtract | Subtraction | Addition | Multiplication | Division | Compositional",
+  "question_type": "metrics-generated | domain-relevant | novel-generated",
   "answer": "string or null",
   "evidence": "string or null",
   "missing_information": "string or null",

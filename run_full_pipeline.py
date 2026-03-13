@@ -15,6 +15,16 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _format_duration_minsec(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}h {minutes}min {secs:.1f}s"
+    return f"{minutes}min {secs:.1f}s"
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -44,16 +54,22 @@ def _run_step(
             text=True,
         )
         elapsed = round(time.perf_counter() - started, 2)
+        elapsed_human = _format_duration_minsec(elapsed)
         log.write(
             f"[{_now_utc()}] STEP {name} END "
-            f"(exit={proc.returncode}, elapsed_s={elapsed})\n"
+            f"(exit={proc.returncode}, elapsed={elapsed_human})\n"
         )
         log.flush()
     if proc.returncode != 0:
         raise RuntimeError(
             f"Step failed: {name} (exit={proc.returncode}). See log: {log_file}"
         )
-    return {"name": name, "exit_code": proc.returncode, "elapsed_s": elapsed}
+    return {
+        "name": name,
+        "exit_code": proc.returncode,
+        "elapsed_seconds": elapsed,
+        "elapsed": elapsed_human,
+    }
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -130,6 +146,62 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("NEO4J_USER", "neo4j"),
         help="Neo4j user.",
     )
+    parser.add_argument(
+        "--build-entity-graph",
+        action="store_true",
+        help=(
+            "Run entity/relationship extraction from chunks and import into Neo4j "
+            "(Entity-RELATED-Entity + Entity-FROM_CHUNK-Chunk)."
+        ),
+    )
+    parser.add_argument(
+        "--entity-model",
+        default=os.environ.get("OLLAMA_LLM_MODEL", "qwen2.5:72b"),
+        help="Ollama model used for entity extraction.",
+    )
+    parser.add_argument(
+        "--entity-types",
+        default=(
+            "company,organization,person,location,date,event,"
+            "financial_metric,revenue,operating_profit,acquisition,ceo"
+        ),
+        help="Comma-separated entity types for extraction prompt.",
+    )
+    parser.add_argument(
+        "--entity-ollama-host",
+        default=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
+        help="Ollama host for entity extraction.",
+    )
+    parser.add_argument(
+        "--entity-max-gleanings",
+        type=int,
+        default=1,
+        help="Extra extraction passes per chunk.",
+    )
+    parser.add_argument(
+        "--entity-limit",
+        type=int,
+        default=0,
+        help="Limit number of chunks for extraction (0 = all).",
+    )
+    parser.add_argument(
+        "--entity-progress-every",
+        type=int,
+        default=20,
+        help="Print entity extraction progress every N chunks.",
+    )
+    parser.add_argument(
+        "--entity-temperature",
+        type=float,
+        default=0.0,
+        help="LLM temperature for entity extraction.",
+    )
+    parser.add_argument(
+        "--entity-batch-size",
+        type=int,
+        default=200,
+        help="Batch size for importing entity graph into Neo4j.",
+    )
     return parser
 
 
@@ -156,6 +228,8 @@ def main() -> None:
     faiss_mapping_path = out_dir / "intid_to_chunkid.jsonl"
     faiss_meta_path = out_dir / "faiss_meta.json"
     query_results_path = out_dir / "query_results_compare.json"
+    entities_path = out_dir / "entities.ndjson"
+    relationships_path = out_dir / "relationships.ndjson"
 
     py = sys.executable
     steps: list[dict[str, Any]] = []
@@ -197,6 +271,70 @@ def main() -> None:
                 cwd=repo_root,
             )
         )
+
+        if args.build_entity_graph:
+            extraction_cmd = [
+                py,
+                "-m",
+                "neo4j_graphrag.extraction.extractor",
+                "--chunks-path",
+                str(chunks_path),
+                "--entities-out",
+                str(entities_path),
+                "--relationships-out",
+                str(relationships_path),
+                "--entity-types",
+                args.entity_types,
+                "--model",
+                args.entity_model,
+                "--ollama-host",
+                args.entity_ollama_host,
+                "--max-gleanings",
+                str(args.entity_max_gleanings),
+                "--limit",
+                str(args.entity_limit),
+                "--progress-every",
+                str(args.entity_progress_every),
+                "--temperature",
+                str(args.entity_temperature),
+            ]
+            steps.append(
+                _run_step(
+                    name="extract_entities",
+                    cmd=extraction_cmd,
+                    env=env,
+                    log_file=log_file,
+                    cwd=repo_root,
+                )
+            )
+
+            import_cmd = [
+                py,
+                "-m",
+                "neo4j_graphrag.extraction.importer",
+                "--entities-path",
+                str(entities_path),
+                "--relationships-path",
+                str(relationships_path),
+                "--batch-size",
+                str(args.entity_batch_size),
+                "--neo4j-uri",
+                args.neo4j_uri,
+                "--neo4j-user",
+                args.neo4j_user,
+            ]
+            if args.neo4j_database:
+                import_cmd.extend(["--neo4j-database", args.neo4j_database])
+
+            steps.append(
+                _run_step(
+                    name="import_entity_graph",
+                    cmd=import_cmd,
+                    env=env,
+                    log_file=log_file,
+                    cwd=repo_root,
+                )
+            )
 
         steps.append(
             _run_step(
@@ -303,6 +441,7 @@ def main() -> None:
         raise
     finally:
         total_elapsed = round(time.perf_counter() - start, 2)
+        total_elapsed_human = _format_duration_minsec(total_elapsed)
         summary = {
             "status": status,
             "error": error if status == "failed" else None,
@@ -317,7 +456,13 @@ def main() -> None:
             "faiss_mapping_path": str(faiss_mapping_path),
             "faiss_meta_path": str(faiss_meta_path),
             "query_results_path": str(query_results_path),
-            "total_elapsed_s": total_elapsed,
+            "build_entity_graph": args.build_entity_graph,
+            "entities_path": str(entities_path) if args.build_entity_graph else None,
+            "relationships_path": (
+                str(relationships_path) if args.build_entity_graph else None
+            ),
+            "total_elapsed_seconds": total_elapsed,
+            "total_elapsed": total_elapsed_human,
             "steps": steps,
         }
         (out_dir / "run_summary.json").write_text(

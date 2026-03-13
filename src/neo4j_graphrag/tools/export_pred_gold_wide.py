@@ -72,6 +72,29 @@ def _gold_index(qa_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]
     return idx, order
 
 
+def _format_duration_minsec(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}h {minutes}min {secs:.1f}s"
+    return f"{minutes}min {secs:.1f}s"
+
+
+def _normalize_latency(row: dict[str, Any]) -> str | None:
+    latency = row.get("latency")
+    if isinstance(latency, str) and latency.strip():
+        return latency.strip()
+    latency_seconds = row.get("latency_seconds")
+    if isinstance(latency_seconds, (int, float)):
+        return _format_duration_minsec(float(latency_seconds))
+    latency_ms = row.get("latency_ms")
+    if isinstance(latency_ms, (int, float)):
+        return _format_duration_minsec(float(latency_ms) / 1000.0)
+    return None
+
+
 def _to_wide_rows(pred_rows: list[dict[str, Any]], qa_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     gold_by_question, gold_order = _gold_index(qa_rows)
     pred_by_question: dict[str, dict[str, Any]] = {}
@@ -97,15 +120,15 @@ def _to_wide_rows(pred_rows: list[dict[str, Any]], qa_rows: list[dict[str, Any]]
                 "gold_type": gold.get("gold_type", gold.get("question_type", gold.get("type"))),
                 "rag_pred_answer": "",
                 "graphrag_pred_answer": "",
-                "rag_latency_ms": None,
-                "graphrag_latency_ms": None,
+                "rag_latency": None,
+                "graphrag_latency": None,
                 "rag_error": None,
                 "graphrag_error": None,
             }
 
         w = pred_by_question[question]
         w[f"{mode}_pred_answer"] = _extract_pred_answer(row.get("answer"))
-        w[f"{mode}_latency_ms"] = row.get("latency_ms")
+        w[f"{mode}_latency"] = _normalize_latency(row)
         w[f"{mode}_error"] = row.get("error")
 
     ordered_questions = [q for q in gold_order if q in pred_by_question]
@@ -132,8 +155,8 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "gold_answer",
         "rag_pred_answer",
         "graphrag_pred_answer",
-        "rag_latency_ms",
-        "graphrag_latency_ms",
+        "rag_latency",
+        "graphrag_latency",
         "rag_error",
         "graphrag_error",
         "gold_evidence",

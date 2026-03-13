@@ -53,6 +53,24 @@ ITEM_10K_HEADER_RE = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# FakeElement: wraps a PyMuPDF page so it looks like an unstructured element.
+# Only parse_and_chunk_item10k needs .text and .metadata.page_number.
+# ---------------------------------------------------------------------------
+class _FakeMeta:
+    def __init__(self, page_number: int, filename: str) -> None:
+        self.page_number = page_number
+        self.filename = filename
+        self.filetype = "application/pdf"
+
+
+class FakeElement:
+    def __init__(self, text: str, page_number: int, filename: str = "") -> None:
+        self.text = text
+        self.category = "NarrativeText"
+        self.metadata = _FakeMeta(page_number=page_number, filename=filename)
+
+
 def normalize_for_id(value: Optional[str]) -> str:
     if value is None:
         return ""
@@ -300,11 +318,9 @@ def ensure_unstructured_importable() -> None:
             if local_unstructured_repo.exists() and str(local_unstructured_repo) not in sys.path:
                 sys.path.insert(0, str(local_unstructured_repo))
                 break
-        # Remove namespace package cache so Python resolves to the local package layout.
         for module_name in list(sys.modules.keys()):
             if module_name == "unstructured" or module_name.startswith("unstructured."):
                 sys.modules.pop(module_name, None)
-        # Validate after sys.path injection.
         import unstructured.chunking  # noqa: F401
         import unstructured.partition.auto  # noqa: F401
 
@@ -460,7 +476,7 @@ def parse_and_chunk_item10k(elements: list[Any], args: argparse.Namespace) -> li
                     page=section["page"],
                     metadata=section["metadata"],
                     chunk_engine="item10k",
-                    parser_engine="unstructured",
+                    parser_engine="pymupdf",  # changed from "unstructured"
                 )
             )
     return parsed_chunks
@@ -498,15 +514,41 @@ def parse_and_chunk_native(
 
 
 def parse_and_chunk_unstructured(path: Path, args: argparse.Namespace) -> list[ParsedChunk]:
-    ensure_unstructured_importable()
-    from unstructured.chunking.dispatch import chunk as chunk_dispatch
-    from unstructured.partition.auto import partition
+    # --- CHANGED: use PyMuPDFLoader instead of unstructured partition ---
+    # PyMuPDFLoader correctly handles tables (converts to text with structure)
+    # and does not require tesseract OCR for text-based PDFs.
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        try:
+            from langchain_community.document_loaders import PyMuPDFLoader
+        except ImportError as exc:
+            raise RuntimeError(
+                "PyMuPDF loader not available. Install with: "
+                "pip install langchain-community pymupdf"
+            ) from exc
 
-    elements = partition(filename=str(path))
+        pages = PyMuPDFLoader(str(path)).load()
+        elements: list[Any] = [
+            FakeElement(
+                text=p.page_content,
+                page_number=int(p.metadata.get("page", 0)) + 1,
+                filename=path.name,
+            )
+            for p in pages
+            if p.page_content.strip()
+        ]
+    else:
+        # Non-PDF unstructured files: fall back to original unstructured partition
+        ensure_unstructured_importable()
+        from unstructured.partition.auto import partition
+        elements = partition(filename=str(path))
+
     if not elements:
         return []
 
     strategy = args.unstructured_chunking
+
+    # item10k strategy: group by Item headers then split
     if strategy == "item10k":
         item10k_chunks = parse_and_chunk_item10k(elements, args)
         if item10k_chunks:
@@ -515,6 +557,38 @@ def parse_and_chunk_unstructured(path: Path, args: argparse.Namespace) -> list[P
             strategy = "basic"
         else:
             return []
+
+    # by_title / basic strategy for non-PDF or fallback
+    # For PDFs we already have FakeElements so we do a simple fixed split
+    if ext == ".pdf":
+        # Flatten all page text and split with fixed size
+        full_text = "\n\n".join(
+            (getattr(e, "text", "") or "").strip()
+            for e in elements
+            if (getattr(e, "text", "") or "").strip()
+        )
+        chunks_text = split_fixed_size(
+            full_text,
+            chunk_size=args.unstructured_max_characters,
+            chunk_overlap=args.unstructured_overlap,
+            approximate=True,
+        )
+        return [
+            ParsedChunk(
+                text=chunk_text,
+                section_name="",
+                page=None,
+                metadata={"filename": path.name},
+                chunk_engine="fixed",
+                parser_engine="pymupdf",
+            )
+            for chunk_text in chunks_text
+            if chunk_text.strip()
+        ]
+
+    # Original unstructured by_title/basic path for non-PDF files
+    ensure_unstructured_importable()
+    from unstructured.chunking.dispatch import chunk as chunk_dispatch
 
     has_title = any(
         getattr(element, "category", "") == "Title"
@@ -642,19 +716,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--unstructured-max-characters",
         type=int,
-        default=1200,
+        default=900,
         help="max_characters for unstructured chunking.",
     )
     parser.add_argument(
         "--unstructured-new-after-n-chars",
         type=int,
-        default=1000,
+        default=750,
         help="new_after_n_chars for unstructured chunking.",
     )
     parser.add_argument(
         "--unstructured-overlap",
         type=int,
-        default=120,
+        default=80,
         help="overlap for unstructured chunking.",
     )
     parser.add_argument(

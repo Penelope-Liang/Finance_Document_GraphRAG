@@ -98,6 +98,16 @@ def _close_embedder(embedder: Any) -> None:
         embedder.client._client.close()
 
 
+def _format_duration_minsec(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}h {minutes}min {secs:.1f}s"
+    return f"{minutes}min {secs:.1f}s"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Build FAISS dense index from chunks.ndjson (chunk_id-aligned)."
@@ -237,7 +247,10 @@ def main() -> None:
             indexed_rows.append(row)
             if args.progress_every > 0 and i % args.progress_every == 0:
                 elapsed = time.perf_counter() - started
-                print(f"  embedded {i}/{len(rows)} chunks ({elapsed:.1f}s)")
+                print(
+                    f"  embedded {i}/{len(rows)} chunks "
+                    f"({_format_duration_minsec(elapsed)})"
+                )
     finally:
         _close_embedder(embedder)
 
@@ -310,7 +323,8 @@ def main() -> None:
     print(f"Meta:    {meta_out}")
     print(
         f"Vectors indexed: {len(indexed_rows)}/{len(rows)} "
-        f"(skipped={skipped_embed}) | dim={dim} | elapsed={elapsed:.1f}s"
+        f"(skipped={skipped_embed}) | dim={dim} | "
+        f"elapsed={_format_duration_minsec(elapsed)}"
     )
 
 

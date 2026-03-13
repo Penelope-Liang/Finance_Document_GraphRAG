@@ -82,6 +82,29 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _format_duration_minsec(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}h {minutes}min {secs:.1f}s"
+    return f"{minutes}min {secs:.1f}s"
+
+
+def _normalize_latency(row: dict[str, Any]) -> str | None:
+    latency = row.get("latency")
+    if isinstance(latency, str) and latency.strip():
+        return latency.strip()
+    latency_seconds = row.get("latency_seconds")
+    if isinstance(latency_seconds, (int, float)):
+        return _format_duration_minsec(float(latency_seconds))
+    latency_ms = row.get("latency_ms")
+    if isinstance(latency_ms, (int, float)):
+        return _format_duration_minsec(float(latency_ms) / 1000.0)
+    return None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Merge prediction rows with gold QA rows for side-by-side inspection."
@@ -156,7 +179,7 @@ def main() -> None:
             "gold_type": gold.get("gold_type"),
             "category": gold.get("category"),
             "reasoning": gold.get("reasoning"),
-            "latency_ms": row.get("latency_ms"),
+            "latency": _normalize_latency(row),
             "retriever": row.get("retriever"),
             "retrieved_chunk_ids": row.get("retrieved_chunk_ids"),
             "context_preview": row.get("context_preview"),
