@@ -6,6 +6,7 @@ import json
 import re
 import runpy
 import sys
+import time
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
@@ -84,6 +85,16 @@ def _entity_key(title: str, entity_type: str) -> str:
 
 def _normalize_record_type(value: Any) -> str:
     return _clean_field(value).strip().strip('"').strip("'").lower()
+
+
+def _format_duration_minsec(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}h {minutes}min {secs:.1f}s"
+    return f"{minutes}min {secs:.1f}s"
 
 
 def _load_prompt_bundle(prompt_file: str | None) -> tuple[str, str, str]:
@@ -498,6 +509,7 @@ def main() -> None:
 
     raw_entities: list[RawEntity] = []
     raw_relationships: list[RawRelationship] = []
+    started = time.perf_counter()
     for idx, chunk in enumerate(chunks, start=1):
         try:
             completion = _extract_for_text(
@@ -527,7 +539,16 @@ def main() -> None:
             )
 
         if idx % max(1, args.progress_every) == 0 or idx == len(chunks):
-            print(f"  processed {idx}/{len(chunks)} chunks")
+            elapsed = time.perf_counter() - started
+            eta_seconds = 0.0
+            if idx > 0:
+                avg_seconds = elapsed / idx
+                eta_seconds = avg_seconds * (len(chunks) - idx)
+            print(
+                f"  processed {idx}/{len(chunks)} chunks "
+                f"(elapsed={_format_duration_minsec(elapsed)}, "
+                f"eta={_format_duration_minsec(eta_seconds)})"
+            )
 
     merged_entities = _merge_entities(raw_entities)
     merged_relationships = _merge_relationships(raw_relationships, merged_entities)
@@ -544,6 +565,7 @@ def main() -> None:
         raw_relationships_out = Path(args.raw_relationships_out).expanduser().resolve()
         _write_ndjson(raw_relationships_out, [r.__dict__ for r in raw_relationships])
 
+    total_elapsed = time.perf_counter() - started
     print("\nDone.")
     print(f"Chunks processed:    {len(chunks)}")
     print(f"Raw entities:        {len(raw_entities)}")
@@ -552,6 +574,7 @@ def main() -> None:
     print(f"Merged relationships:{len(merged_relationships)}")
     print(f"Entities out:        {entities_out}")
     print(f"Relationships out:   {relationships_out}")
+    print(f"Elapsed:             {_format_duration_minsec(total_elapsed)}")
 
 
 if __name__ == "__main__":
