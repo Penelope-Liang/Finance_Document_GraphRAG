@@ -528,15 +528,18 @@ def parse_and_chunk_unstructured(path: Path, args: argparse.Namespace) -> list[P
             ) from exc
 
         pages = PyMuPDFLoader(str(path)).load()
-        elements: list[Any] = [
-            FakeElement(
-                text=p.page_content,
-                page_number=int(p.metadata.get("page", 0)) + 1,
-                filename=path.name,
-            )
-            for p in pages
-            if p.page_content.strip()
-        ]
+        # Split each page into lines so _item10k_section_from_text can detect
+        # Item headers on any line, not just the first line of a page.
+        elements: list[Any] = []
+        for p in pages:
+            page_num = int(p.metadata.get("page", 0)) + 1
+            for line in p.page_content.splitlines():
+                if line.strip():
+                    elements.append(FakeElement(
+                        text=line.strip(),
+                        page_number=page_num,
+                        filename=path.name,
+                    ))
     else:
         # Non-PDF unstructured files: fall back to original unstructured partition
         ensure_unstructured_importable()
