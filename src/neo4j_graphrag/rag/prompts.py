@@ -112,15 +112,36 @@ Question:
 Question type taxonomy (FinanceBench):
 1) metrics-generated
 - Meaning: asks for specific financial figures/metrics from statements, or direct numeric computation based on those figures.
-- Example: "What is the FY2018 capital expenditure amount (in USD millions) for 3M?"
 
 2) domain-relevant
 - Meaning: asks for business/industry interpretation grounded in financial information, not only raw number extraction.
-- Example: "Is 3M a capital-intensive business based on FY2022 data?"
 
 3) novel-generated
 - Meaning: open-ended, multi-step, cross-section or cross-period analytical reasoning.
-- Example: "If we exclude the impact of M&A, which segment has dragged down 3M's overall growth in 2022?"
+
+FinanceBench worked examples:
+
+Example A (domain-relevant):
+Question:
+Are Best Buy's gross margins historically consistent (not fluctuating more than roughly 2% each year)? If gross margins are not a relevant metric for a company like this, then please state that and explain why.
+Answer:
+Yes, the margins have been consistent, there has been a minor decline of 1.1% in gross margins between FY2022 and FY2023.
+Evidence:
+Gross Profit/Revenue
+9912/46298
+11640/51761
+
+Example B (novel-generated):
+Question:
+What was the key agenda of the AMCOR's 8k filing dated 1st July 2022?
+Answer:
+Amcor Finance (USA), Inc. and Amcor Flexibles North America, Inc., entered into supplemental indentures relating to Guaranteed Senior Notes due 2026 and 2028. This involved the substitution of the Substitute Issuer (Amcor Flexibles North America) for the Former Issuer (Amcor Finance) and the assumption of covenants under the indentures. (In essence a novation agreement)
+
+Example C (metrics-generated):
+Question:
+How much (in USD billions) did American Water Works pay out in cash dividends for FY2020? Compute or extract the answer by primarily using the details outlined in the statement of cash flows.
+Answer:
+$0.40
 
 Rules:
 1. First infer the question_type from the taxonomy above.
@@ -129,6 +150,7 @@ Rules:
 4. For metrics-generated questions:
    - extract exact numbers from context;
    - if calculation is needed, compute from extracted values.
+   - the formula may not be explicitly provided; infer the required financial formula from the question wording and compute it.
 5. For domain-relevant / novel-generated questions:
    - provide concise reasoning grounded in evidence from context.
 6. If context is insufficient:

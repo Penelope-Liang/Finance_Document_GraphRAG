@@ -194,6 +194,48 @@ def _build_context_preview(
     return content
 
 
+def _truncate_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars].rstrip()}..."
+
+
+def _build_retrieved_evidence(
+    items: list[RetrieverResultItem], evidence_items: int, evidence_chars: int
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for idx, item in enumerate(items[: max(0, evidence_items)], start=1):
+        metadata = item.metadata or {}
+        entities = metadata.get("entities")
+        if isinstance(entities, list):
+            entities = entities[:20]
+        row = {
+            "rank": idx,
+            "chunk_id": metadata.get("chunk_id"),
+            "score": metadata.get("score"),
+            "dense_score": metadata.get("dense_score"),
+            "sparse_score": metadata.get("sparse_score"),
+            "fused_score": metadata.get("fused_score"),
+            "section_name": metadata.get("section_name"),
+            "form_id": metadata.get("form_id"),
+            "company_id": metadata.get("company_id"),
+            "entities": entities,
+            "text_excerpt": _truncate_text(str(item.content), max(1, evidence_chars)),
+        }
+        rows.append(row)
+    return rows
+
+
+def _retrieval_status(error: Optional[str], chunk_ids: list[str], items: list[RetrieverResultItem]) -> str:
+    if error:
+        return "error"
+    if not chunk_ids and not items:
+        return "no_hits"
+    if chunk_ids and not items:
+        return "id_only_no_text"
+    return "hits"
+
+
 def _import_faiss():
     try:
         import faiss
@@ -733,7 +775,11 @@ def _save_results(
         "latency",
         "latency_seconds",
         "retriever",
+        "retrieval_status",
+        "retrieved_chunk_count",
+        "retrieved_item_count",
         "retrieved_chunk_ids",
+        "retrieved_evidence",
         "context_preview",
         "error",
     ]
@@ -743,6 +789,9 @@ def _save_results(
         for row in rows:
             csv_row = row.copy()
             csv_row["retrieved_chunk_ids"] = "|".join(row["retrieved_chunk_ids"])
+            csv_row["retrieved_evidence"] = json.dumps(
+                row.get("retrieved_evidence", []), ensure_ascii=False
+            )
             writer.writerow(csv_row)
 
 
@@ -842,6 +891,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=500,
         help="Max character length of context preview.",
+    )
+    parser.add_argument(
+        "--evidence-items",
+        type=int,
+        default=5,
+        help="Number of retrieved evidence rows to store in structured output.",
+    )
+    parser.add_argument(
+        "--evidence-chars",
+        type=int,
+        default=400,
+        help="Max character length per retrieved evidence text excerpt.",
     )
     parser.add_argument(
         "--retrieval-query",
@@ -993,6 +1054,7 @@ def main() -> None:
                     error = None
                     context_preview = ""
                     chunk_ids: list[str] = []
+                    items: list[RetrieverResultItem] = []
                     retriever_name = ""
                     try:
                         if args.dense_backend == "neo4j":
@@ -1048,6 +1110,10 @@ def main() -> None:
 
                     latency_seconds = round(time.perf_counter() - start, 2)
                     latency = _format_duration_minsec(latency_seconds)
+                    evidence_rows = _build_retrieved_evidence(
+                        items, args.evidence_items, args.evidence_chars
+                    )
+                    retrieval_status = _retrieval_status(error, chunk_ids, items)
                     run_rows.append(
                         {
                             "mode": mode,
@@ -1057,10 +1123,17 @@ def main() -> None:
                             "latency": latency,
                             "latency_seconds": latency_seconds,
                             "retriever": retriever_name,
+                            "retrieval_status": retrieval_status,
+                            "retrieved_chunk_count": len(chunk_ids),
+                            "retrieved_item_count": len(items),
                             "retrieved_chunk_ids": chunk_ids,
+                            "retrieved_evidence": evidence_rows,
                             "context_preview": context_preview,
                             "error": error,
                         }
+                    )
+                    print(
+                        f"  retrieved: status={retrieval_status} chunks={len(chunk_ids)} items={len(items)}"
                     )
                     print(f"  latency: {latency}")
 
