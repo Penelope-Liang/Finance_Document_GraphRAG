@@ -48,7 +48,7 @@ class ParsedChunk:
 
 ITEM_10K_HEADER_RE = re.compile(
     r"(?i)^\s*(?:part\s+[ivx]+\s+)?item\s+"
-    r"(1a|1b|1c|1|2|3|4|5|6|7a|7|8|9a|9b|9c|9|10|11|12|13|14|15|16)"
+    r"(\d+(?:\.\d+)?[a-c]?)"
     r"\s*[\.\-:\)]?\s*(.*)$"
 )
 
