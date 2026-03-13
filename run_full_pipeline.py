@@ -39,13 +39,18 @@ def _run_step(
     env: dict[str, str],
     log_file: Path,
     cwd: Path,
+    heartbeat_seconds: int,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     with log_file.open("a", encoding="utf-8") as log:
-        log.write(f"\n[{_now_utc()}] STEP {name} START\n")
-        log.write(f"CMD: {' '.join(cmd)}\n")
+        start_line = f"\n[{_now_utc()}] STEP {name} START"
+        cmd_line = f"CMD: {' '.join(cmd)}"
+        log.write(start_line + "\n")
+        log.write(cmd_line + "\n")
         log.flush()
-        proc = subprocess.run(
+        print(start_line, flush=True)
+        print(cmd_line, flush=True)
+        proc = subprocess.Popen(
             cmd,
             cwd=str(cwd),
             env=env,
@@ -53,13 +58,34 @@ def _run_step(
             stderr=subprocess.STDOUT,
             text=True,
         )
+        last_heartbeat = time.perf_counter()
+        while True:
+            return_code = proc.poll()
+            now = time.perf_counter()
+            if return_code is not None:
+                break
+            if heartbeat_seconds > 0 and (now - last_heartbeat) >= heartbeat_seconds:
+                elapsed_now = now - started
+                heartbeat_line = (
+                    f"[{_now_utc()}] STEP {name} HEARTBEAT "
+                    f"(pid={proc.pid}, elapsed={_format_duration_minsec(elapsed_now)})"
+                )
+                log.write(heartbeat_line + "\n")
+                log.flush()
+                print(heartbeat_line, flush=True)
+                last_heartbeat = now
+            time.sleep(1)
         elapsed = round(time.perf_counter() - started, 2)
         elapsed_human = _format_duration_minsec(elapsed)
-        log.write(
+        end_line = (
             f"[{_now_utc()}] STEP {name} END "
-            f"(exit={proc.returncode}, elapsed={elapsed_human})\n"
+            f"(exit={proc.returncode}, elapsed={elapsed_human})"
+        )
+        log.write(
+            end_line + "\n"
         )
         log.flush()
+        print(end_line, flush=True)
     if proc.returncode != 0:
         raise RuntimeError(
             f"Step failed: {name} (exit={proc.returncode}). See log: {log_file}"
@@ -145,6 +171,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--neo4j-user",
         default=os.environ.get("NEO4J_USER", "neo4j"),
         help="Neo4j user.",
+    )
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=int,
+        default=30,
+        help="Emit step heartbeat logs every N seconds while a step is running.",
     )
     parser.add_argument(
         "--build-entity-graph",
@@ -252,6 +284,7 @@ def main() -> None:
                 env=env,
                 log_file=log_file,
                 cwd=repo_root,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
         )
 
@@ -269,6 +302,7 @@ def main() -> None:
                 env=env,
                 log_file=log_file,
                 cwd=repo_root,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
         )
 
@@ -305,6 +339,7 @@ def main() -> None:
                     env=env,
                     log_file=log_file,
                     cwd=repo_root,
+                    heartbeat_seconds=args.heartbeat_seconds,
                 )
             )
 
@@ -333,6 +368,7 @@ def main() -> None:
                     env=env,
                     log_file=log_file,
                     cwd=repo_root,
+                    heartbeat_seconds=args.heartbeat_seconds,
                 )
             )
 
@@ -358,6 +394,7 @@ def main() -> None:
                 env=env,
                 log_file=log_file,
                 cwd=repo_root,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
         )
 
@@ -382,6 +419,7 @@ def main() -> None:
                 env=env,
                 log_file=log_file,
                 cwd=repo_root,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
         )
 
@@ -430,6 +468,7 @@ def main() -> None:
                     env=env,
                     log_file=log_file,
                     cwd=repo_root,
+                    heartbeat_seconds=args.heartbeat_seconds,
                 )
             )
 
