@@ -40,7 +40,7 @@ def _extract_pred_answer(raw_answer: Any) -> str:
             value = raw_answer.get(key)
             if value is not None and str(value).strip():
                 return str(value).strip()
-        return json.dumps(raw_answer, ensure_ascii=False)
+        return ""
 
     text = str(raw_answer).strip()
     if not text:
@@ -54,6 +54,7 @@ def _extract_pred_answer(raw_answer: Any) -> str:
                 value = payload.get(key)
                 if value is not None and str(value).strip():
                     return str(value).strip()
+            return ""
     except Exception:
         pass
 

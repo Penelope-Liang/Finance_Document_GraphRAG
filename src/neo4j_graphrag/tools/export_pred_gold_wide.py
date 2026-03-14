@@ -33,31 +33,80 @@ def _strip_json_fence(text: str) -> str:
     return t.strip()
 
 
-def _extract_pred_answer(raw_answer: Any) -> str:
-    if raw_answer is None:
-        return ""
+def _extract_payload(raw_answer: Any) -> dict[str, Any] | None:
     if isinstance(raw_answer, dict):
-        for key in ("answer", "final_answer"):
-            value = raw_answer.get(key)
-            if value is not None and str(value).strip():
-                return str(value).strip()
-        return json.dumps(raw_answer, ensure_ascii=False)
-
+        return raw_answer
+    if raw_answer is None:
+        return None
     text = str(raw_answer).strip()
     if not text:
-        return ""
-
+        return None
     candidate = _strip_json_fence(text)
     try:
         payload = json.loads(candidate)
         if isinstance(payload, dict):
-            for key in ("answer", "final_answer"):
-                value = payload.get(key)
-                if value is not None and str(value).strip():
-                    return str(value).strip()
+            return payload
     except Exception:
-        pass
-    return text
+        return None
+    return None
+
+
+def _normalize_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = (
+                    item.get("evidence_text")
+                    or item.get("text")
+                    or item.get("quote")
+                    or item.get("reference")
+                )
+                if text is not None:
+                    parts.append(str(text).strip())
+                else:
+                    parts.append(json.dumps(item, ensure_ascii=False))
+            else:
+                parts.append(str(item).strip())
+        return "\n".join(p for p in parts if p)
+    if isinstance(value, dict):
+        text = (
+            value.get("evidence_text")
+            or value.get("text")
+            or value.get("quote")
+            or value.get("reference")
+        )
+        if text is not None:
+            return str(text).strip()
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _extract_pred_answer(raw_answer: Any) -> str:
+    if raw_answer is None:
+        return ""
+    payload = _extract_payload(raw_answer)
+    if payload is not None:
+        for key in ("answer", "final_answer"):
+            value = payload.get(key)
+            normalized = _normalize_value(value)
+            if normalized:
+                return normalized
+        return ""
+    return str(raw_answer).strip()
+
+
+def _extract_pred_evidence(raw_evidence: Any, raw_answer: Any) -> str:
+    normalized_evidence = _normalize_value(raw_evidence)
+    if normalized_evidence:
+        return normalized_evidence
+    payload = _extract_payload(raw_answer)
+    if payload is None:
+        return ""
+    return _normalize_value(payload.get("evidence"))
 
 
 def _gold_index(qa_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[str]]:
@@ -70,29 +119,6 @@ def _gold_index(qa_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]
         idx[question] = row
         order.append(question)
     return idx, order
-
-
-def _format_duration_minsec(seconds: float) -> str:
-    total = max(0.0, float(seconds))
-    hours = int(total // 3600)
-    minutes = int((total % 3600) // 60)
-    secs = total % 60
-    if hours > 0:
-        return f"{hours}h {minutes}min {secs:.1f}s"
-    return f"{minutes}min {secs:.1f}s"
-
-
-def _normalize_latency(row: dict[str, Any]) -> str | None:
-    latency = row.get("latency")
-    if isinstance(latency, str) and latency.strip():
-        return latency.strip()
-    latency_seconds = row.get("latency_seconds")
-    if isinstance(latency_seconds, (int, float)):
-        return _format_duration_minsec(float(latency_seconds))
-    latency_ms = row.get("latency_ms")
-    if isinstance(latency_ms, (int, float)):
-        return _format_duration_minsec(float(latency_ms) / 1000.0)
-    return None
 
 
 def _to_wide_rows(pred_rows: list[dict[str, Any]], qa_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -112,24 +138,21 @@ def _to_wide_rows(pred_rows: list[dict[str, Any]], qa_rows: list[dict[str, Any]]
             pred_by_question[question] = {
                 "_id": gold.get("_id", gold.get("id")),
                 "question": question,
-                "gold_answer": gold.get("gold_answer", gold.get("answer")),
-                "gold_evidence": gold.get(
-                    "gold_evidence",
-                    gold.get("gold_reference", gold.get("references", gold.get("evidence"))),
-                ),
                 "gold_type": gold.get("gold_type", gold.get("question_type", gold.get("type"))),
+                "gold_answer": gold.get("gold_answer", gold.get("answer")),
+                "gold_reference": gold.get(
+                    "gold_reference",
+                    gold.get("gold_evidence", gold.get("references", gold.get("evidence"))),
+                ),
                 "rag_pred_answer": "",
+                "rag_evidence": "",
                 "graphrag_pred_answer": "",
-                "rag_latency": None,
-                "graphrag_latency": None,
-                "rag_error": None,
-                "graphrag_error": None,
+                "graphrag_evidence": "",
             }
 
         w = pred_by_question[question]
         w[f"{mode}_pred_answer"] = _extract_pred_answer(row.get("answer"))
-        w[f"{mode}_latency"] = _normalize_latency(row)
-        w[f"{mode}_error"] = row.get("error")
+        w[f"{mode}_evidence"] = _extract_pred_evidence(row.get("evidence"), row.get("answer"))
 
     ordered_questions = [q for q in gold_order if q in pred_by_question]
     seen = set(ordered_questions)
@@ -152,14 +175,12 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "_id",
         "question",
         "gold_type",
-        "gold_answer",
         "rag_pred_answer",
+        "rag_evidence",
         "graphrag_pred_answer",
-        "rag_latency",
-        "graphrag_latency",
-        "rag_error",
-        "graphrag_error",
-        "gold_evidence",
+        "graphrag_evidence",
+        "gold_answer",
+        "gold_reference",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

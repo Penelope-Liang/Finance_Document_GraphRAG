@@ -236,6 +236,89 @@ def _retrieval_status(error: Optional[str], chunk_ids: list[str], items: list[Re
     return "hits"
 
 
+def _strip_json_fence(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```json"):
+        t = t[len("```json") :].strip()
+    elif t.startswith("```"):
+        t = t[len("```") :].strip()
+    if t.endswith("```"):
+        t = t[: -len("```")].strip()
+    return t
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _normalize_evidence(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = (
+                    item.get("evidence_text")
+                    or item.get("text")
+                    or item.get("quote")
+                    or item.get("reference")
+                )
+                if text is not None:
+                    parts.append(str(text).strip())
+                else:
+                    parts.append(json.dumps(item, ensure_ascii=False))
+            else:
+                parts.append(str(item).strip())
+        return "\n".join(p for p in parts if p)
+    if isinstance(value, dict):
+        text = (
+            value.get("evidence_text")
+            or value.get("text")
+            or value.get("quote")
+            or value.get("reference")
+        )
+        if text is not None:
+            return str(text).strip()
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _parse_llm_answer_and_evidence(raw: Any) -> tuple[str, str]:
+    if raw is None:
+        return ("", "")
+
+    payload: Optional[dict[str, Any]]
+    if isinstance(raw, dict):
+        payload = raw
+    else:
+        text = str(raw).strip()
+        if not text:
+            return ("", "")
+        candidate = _strip_json_fence(text)
+        payload = None
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except Exception:
+            payload = None
+
+        if payload is None:
+            return (text, "")
+
+    answer = _coerce_text(payload.get("answer") if "answer" in payload else payload.get("final_answer"))
+    evidence = _normalize_evidence(payload.get("evidence"))
+    return (answer, evidence)
+
+
 def _import_faiss():
     try:
         import faiss
@@ -772,6 +855,7 @@ def _save_results(
         "retrieval",
         "question",
         "answer",
+        "evidence",
         "latency",
         "latency_seconds",
         "retriever",
@@ -1051,6 +1135,7 @@ def main() -> None:
 
                     start = time.perf_counter()
                     answer = None
+                    evidence = ""
                     error = None
                     context_preview = ""
                     chunk_ids: list[str] = []
@@ -1099,6 +1184,7 @@ def main() -> None:
                                 items, args.preview_items, args.preview_chars
                             )
 
+                        answer, evidence = _parse_llm_answer_and_evidence(answer)
                         print(
                             f"  answer: {answer[:120]}..."
                             if answer is not None and len(answer) > 120
@@ -1120,6 +1206,7 @@ def main() -> None:
                             "retrieval": args.retrieval,
                             "question": question,
                             "answer": answer,
+                            "evidence": evidence,
                             "latency": latency,
                             "latency_seconds": latency_seconds,
                             "retriever": retriever_name,
