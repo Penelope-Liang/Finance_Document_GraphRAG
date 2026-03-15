@@ -74,6 +74,72 @@ def _load_questions(args: argparse.Namespace) -> list[str]:
     return questions
 
 
+def _read_json_or_jsonl(path: Path) -> list[dict[str, Any]]:
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        payload = json.loads(text)
+        if isinstance(payload, list):
+            return [x for x in payload if isinstance(x, dict)]
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
+def _doc_key(doc_id: str) -> str:
+    value = doc_id.strip().lower()
+    if value.endswith(".pdf"):
+        value = value[:-4]
+    return value
+
+
+def _extract_docs_from_row(row: dict[str, Any]) -> set[str]:
+    docs: set[str] = set()
+    for key in ("doc_id", "doc_name", "form_id"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            docs.add(value.strip())
+
+    refs = row.get("gold_reference") or row.get("gold_evidence") or row.get("evidence")
+    if isinstance(refs, dict):
+        doc_name = refs.get("doc_name")
+        if isinstance(doc_name, str) and doc_name.strip():
+            docs.add(doc_name.strip())
+    elif isinstance(refs, list):
+        for item in refs:
+            if not isinstance(item, dict):
+                continue
+            doc_name = item.get("doc_name")
+            if isinstance(doc_name, str) and doc_name.strip():
+                docs.add(doc_name.strip())
+    return docs
+
+
+def _load_question_doc_map(path: Optional[str]) -> dict[str, set[str]]:
+    if not path:
+        return {}
+    p = Path(path)
+    rows = _read_json_or_jsonl(p)
+    out: dict[str, set[str]] = {}
+    for row in rows:
+        question = str(row.get("question", "")).strip()
+        if not question:
+            continue
+        docs = _extract_docs_from_row(row)
+        if not docs:
+            continue
+        out.setdefault(question, set()).update(docs)
+    return out
+
+
 def _read_text_file(path: Optional[str]) -> Optional[str]:
     if not path:
         return None
@@ -491,6 +557,7 @@ def _faiss_dense_search(
     top_k: int,
     effective_search_ratio: int,
     normalize: bool,
+    allowed_doc_keys: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
     faiss = _import_faiss()
     np = _import_numpy()
@@ -512,6 +579,12 @@ def _faiss_dense_search(
         chunk_id = row.get("chunk_id")
         if not chunk_id:
             continue
+        doc_id = row.get("doc_id")
+        if allowed_doc_keys:
+            if not isinstance(doc_id, str) or not doc_id.strip():
+                continue
+            if _doc_key(doc_id) not in allowed_doc_keys:
+                continue
         chunk_id_str = str(chunk_id)
         if chunk_id_str in seen:
             continue
@@ -521,6 +594,7 @@ def _faiss_dense_search(
                 "chunk_id": chunk_id_str,
                 "dense_score": float(score),
                 "int_id": int_id,
+                "doc_id": doc_id,
                 "sources": ["dense"],
             }
         )
@@ -534,10 +608,17 @@ def _neo4j_fulltext_search(
     query_text: str,
     top_k: int,
     database: Optional[str],
+    allowed_doc_ids: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
     query = """
     CALL db.index.fulltext.queryNodes($index_name, $query_text) YIELD node, score
-    RETURN coalesce(node.chunk_id, elementId(node)) AS chunk_id, score
+    OPTIONAL MATCH (node)-[:IN_FORM]->(form_direct)
+    OPTIONAL MATCH (node)-[:IN_SECTION]->(sec)<-[:HAS_SECTION]-(form_from_section)
+    WITH node, score, coalesce(form_direct, form_from_section) AS form
+    WHERE size($allowed_doc_ids) = 0
+       OR form.form_id IN $allowed_doc_ids
+       OR replace(form.form_id, '.pdf', '') IN $allowed_doc_ids
+    RETURN coalesce(node.chunk_id, elementId(node)) AS chunk_id, score, form.form_id AS form_id
     ORDER BY score DESC
     LIMIT $top_k
     """
@@ -547,6 +628,7 @@ def _neo4j_fulltext_search(
             "index_name": fulltext_index_name,
             "query_text": query_text,
             "top_k": top_k,
+            "allowed_doc_ids": allowed_doc_ids or [],
         },
         database_=database,
         routing_=neo4j.RoutingControl.READ,
@@ -565,6 +647,7 @@ def _neo4j_fulltext_search(
             {
                 "chunk_id": chunk_id_str,
                 "sparse_score": float(record.get("score", 0.0)),
+                "doc_id": record.get("form_id"),
                 "sources": ["sparse"],
             }
         )
@@ -772,7 +855,9 @@ def _run_faiss_round(
     alpha: Optional[float],
     normalize: bool,
     rrf_k: int,
+    allowed_doc_ids: Optional[list[str]] = None,
 ) -> tuple[str, str, list[RetrieverResultItem], list[str]]:
+    allowed_doc_keys = {_doc_key(x) for x in (allowed_doc_ids or []) if isinstance(x, str) and x.strip()}
     dense_hits = _faiss_dense_search(
         index=index,
         mapping=mapping,
@@ -781,6 +866,7 @@ def _run_faiss_round(
         top_k=top_k,
         effective_search_ratio=effective_search_ratio,
         normalize=normalize,
+        allowed_doc_keys=allowed_doc_keys if allowed_doc_keys else None,
     )
 
     if retrieval == "vector":
@@ -793,6 +879,7 @@ def _run_faiss_round(
             query_text=query_text,
             top_k=max(top_k, top_k * max(1, effective_search_ratio)),
             database=database,
+            allowed_doc_ids=allowed_doc_ids,
         )
         if hybrid_ranker == "linear":
             fused_hits = _fuse_hits_linear(
@@ -864,6 +951,7 @@ def _save_results(
         "retrieved_item_count",
         "retrieved_chunk_ids",
         "retrieved_evidence",
+        "doc_filter",
         "context_preview",
         "error",
     ]
@@ -876,6 +964,7 @@ def _save_results(
             csv_row["retrieved_evidence"] = json.dumps(
                 row.get("retrieved_evidence", []), ensure_ascii=False
             )
+            csv_row["doc_filter"] = "|".join(row.get("doc_filter", []))
             writer.writerow(csv_row)
 
 
@@ -893,6 +982,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--questions-file",
         help="File containing questions (one per line, '#' for comments)",
+    )
+    parser.add_argument(
+        "--question-doc-map",
+        help=(
+            "Optional JSON/JSONL file mapping question -> doc_id/doc_name/form_id. "
+            "If provided, retrieval will be filtered to mapped docs per question."
+        ),
     )
     parser.add_argument(
         "--mode",
@@ -1099,6 +1195,7 @@ def main() -> None:
                 model_params={"options": {"temperature": args.temperature}},
             )
             embedder = OllamaEmbeddings(model=args.embedder_model)
+            question_doc_map = _load_question_doc_map(args.question_doc_map)
 
             rag_by_mode: dict[str, GraphRAG] = {}
             if args.dense_backend == "neo4j":
@@ -1141,6 +1238,7 @@ def main() -> None:
                     chunk_ids: list[str] = []
                     items: list[RetrieverResultItem] = []
                     retriever_name = ""
+                    allowed_doc_ids = sorted(question_doc_map.get(question, set()))
                     try:
                         if args.dense_backend == "neo4j":
                             result = rag_by_mode[mode].search(
@@ -1178,6 +1276,7 @@ def main() -> None:
                                 alpha=args.alpha,
                                 normalize=not args.faiss_no_normalize,
                                 rrf_k=args.faiss_rrf_k,
+                                allowed_doc_ids=allowed_doc_ids,
                             )
                             chunk_ids = selected_ids
                             context_preview = _build_context_preview(
@@ -1215,6 +1314,7 @@ def main() -> None:
                             "retrieved_item_count": len(items),
                             "retrieved_chunk_ids": chunk_ids,
                             "retrieved_evidence": evidence_rows,
+                            "doc_filter": allowed_doc_ids,
                             "context_preview": context_preview,
                             "error": error,
                         }
