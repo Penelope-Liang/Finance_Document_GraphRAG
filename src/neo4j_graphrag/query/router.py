@@ -107,6 +107,19 @@ def _extract_docs_from_row(row: dict[str, Any]) -> set[str]:
         value = row.get(key)
         if isinstance(value, str) and value.strip():
             docs.add(value.strip())
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    docs.add(item.strip())
+
+    for key in ("doc_ids", "doc_names", "form_ids"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            docs.add(value.strip())
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    docs.add(item.strip())
 
     refs = row.get("gold_reference") or row.get("gold_evidence") or row.get("evidence")
     if isinstance(refs, dict):
