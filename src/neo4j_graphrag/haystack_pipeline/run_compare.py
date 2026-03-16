@@ -94,20 +94,39 @@ Question type note:
 - metrics-generated means the question asks for specific financial figures/metrics from statements,
   or direct numeric computation based on those figures.
 
-Worked example (metrics-generated):
+Worked example A (direct extraction):
 Question:
 How much (in USD billions) did American Water Works pay out in cash dividends for FY2020?
 Compute or extract the answer by primarily using the details outlined in the statement of cash flows.
 Answer:
 $0.40
 
+Worked example B (calculation):
+Question:
+What is the FY2019 fixed asset turnover ratio for Activision Blizzard? Fixed asset turnover ratio is defined as:
+FY2019 revenue / (average PP&E between FY2018 and FY2019). Round your answer to two decimal places.
+Base your judgments on the information provided primarily in the statement of income and the statement of financial position.
+Answer:
+24.26
+Supporting idea:
+- This is a calculation question, not direct extraction.
+- The simpler metrics used are:
+  Metric 1: Total revenue. Located as line item "Total net revenues".
+  Metric 2: PP&E, net. Located as line item "Property and equipment, net".
+
 Rules:
-1. This is metrics-generated only. Extract and/or calculate numeric answer from context.
-2. Return one concise final answer line only (number + unit when applicable).
-3. Do not output JSON, markdown, or explanations.
-4. If multiple candidate values exist, prefer same company + same fiscal period asked.
-5. If a formula is implied by the question, compute it explicitly from retrieved values.
-6. Only if no relevant numeric value exists in context, return exactly: "insufficient evidence".
+1. This is metrics-generated only.
+2. First decide whether the question is:
+   - a direct extraction question, where the answer is stated explicitly in context; or
+   - a calculation question, where the answer must be computed from simpler values in context.
+3. For direct extraction questions, return the stated value directly.
+4. For calculation questions, infer the formula from the current question itself and compute it from retrieved values.
+5. Do not reuse a formula from the examples unless the current question explicitly requires that same formula.
+6. The examples above only illustrate question types; they do not define the formula for other questions.
+7. Return one concise final answer line only (number + unit when applicable).
+8. Do not output JSON, markdown, or explanations.
+9. If multiple candidate values exist, prefer same company + same fiscal period asked.
+10. Only if no relevant numeric value exists in context, return exactly: "insufficient evidence".
 
 Final answer:
 """
