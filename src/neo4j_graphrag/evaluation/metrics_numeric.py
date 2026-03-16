@@ -12,6 +12,7 @@ from typing import Any
 
 
 NUMBER_RE = re.compile(r"[-+]?\(?\d[\d,]*(?:\.\d+)?\)?")
+OLLAMA_CONTENT_RE = re.compile(r"content='((?:\\'|[^'])*)'")
 
 MONEY_UNIT_TO_DOLLARS = {
     "usd_thousands": 1e3,
@@ -104,6 +105,12 @@ def _extract_pred_answer(raw_answer: Any) -> str:
             return ""
     except Exception:
         pass
+
+    match = OLLAMA_CONTENT_RE.search(text)
+    if match:
+        content = match.group(1).replace("\\'", "'").strip()
+        if content:
+            return content
 
     return text
 

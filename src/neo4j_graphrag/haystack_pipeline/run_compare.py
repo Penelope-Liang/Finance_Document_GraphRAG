@@ -581,6 +581,11 @@ def _generate(
             message = response.get("message") or {}
             if isinstance(message, dict):
                 return str(message.get("content", ""))
+        message = getattr(response, "message", None)
+        if message is not None:
+            content = getattr(message, "content", None)
+            if content is not None:
+                return str(content)
         return str(response)
 
     raise RuntimeError("Generator is not initialized.")
