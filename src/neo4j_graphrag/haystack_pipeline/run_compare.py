@@ -22,6 +22,7 @@ from neo4j_graphrag.haystack_pipeline.io_utils import (
     read_json_or_jsonl,
     read_questions,
     save_results,
+    strip_json_fence,
     truncate_text,
 )
 
@@ -48,6 +49,30 @@ class IndexData:
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_ANSWER_PREFIX_RE = re.compile(r"^\s*answer\s*[:：]\s*", flags=re.IGNORECASE)
+
+_ANSWER_ONLY_SYSTEM_INSTRUCTION = (
+    "You are a financial QA assistant. Use only the provided context. "
+    "Return only the final answer text, no JSON."
+)
+
+_ANSWER_ONLY_TEMPLATE = """You are a financial QA expert.
+Use only the provided financial context.
+
+Question:
+{query_text}
+
+Context:
+{context}
+
+Rules:
+1. Return only the final answer text in a single concise line.
+2. Do not output JSON, markdown, labels, or extra explanation.
+3. For metrics questions, compute from context when needed and include units.
+4. If context is incomplete, return the best supported answer and explicitly append: "(incomplete context)".
+
+Final answer:
+"""
 
 
 def _load_rag_prompt_template() -> tuple[str, str]:
@@ -62,6 +87,27 @@ def _load_rag_prompt_template() -> tuple[str, str]:
 
 def _tokenize(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _parse_answer_only(raw: Any) -> str:
+    if raw is None:
+        return ""
+    text = strip_json_fence(str(raw).strip())
+    if not text:
+        return ""
+
+    # Allow fallback if the model still returns JSON.
+    try:
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            answer = payload.get("answer", payload.get("final_answer"))
+            if answer is not None:
+                return re.sub(r"\s+", " ", str(answer)).strip()
+    except Exception:
+        pass
+
+    text = _ANSWER_PREFIX_RE.sub("", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _import_haystack_text_embedder():
@@ -560,6 +606,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run retrieval diagnostics only; skip generation.",
     )
     parser.add_argument(
+        "--answer-only",
+        action="store_true",
+        help="Use answer-only prompt and store a plain final answer (no JSON expected).",
+    )
+    parser.add_argument(
         "--generator-backend",
         choices=["ollama", "none"],
         default="ollama",
@@ -642,7 +693,11 @@ def main() -> None:
         text_embedder.warm_up()
 
     generator, generator_model = _init_generator(args)
-    system_instruction, prompt_template_text = _load_rag_prompt_template()
+    if args.answer_only:
+        system_instruction = _ANSWER_ONLY_SYSTEM_INSTRUCTION
+        prompt_template_text = _ANSWER_ONLY_TEMPLATE
+    else:
+        system_instruction, prompt_template_text = _load_rag_prompt_template()
     modes = ["rag", "graphrag"] if args.mode == "compare" else [args.mode]
 
     run_rows: list[dict[str, Any]] = []
@@ -806,7 +861,11 @@ def main() -> None:
                         system_instruction=system_instruction,
                         args=args,
                     )
-                    answer, evidence = parse_answer_and_evidence(raw)
+                    if args.answer_only:
+                        answer = _parse_answer_only(raw)
+                        evidence = ""
+                    else:
+                        answer, evidence = parse_answer_and_evidence(raw)
                     if not evidence:
                         evidence = "\n".join(
                             r["text_excerpt"] for r in evidence_rows[:3] if r.get("text_excerpt")
