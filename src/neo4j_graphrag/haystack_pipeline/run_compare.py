@@ -483,6 +483,18 @@ def _init_generator(args: argparse.Namespace) -> tuple[Optional[Any], str]:
     if args.retrieval_only or args.generator_backend == "none":
         return (None, "none")
 
+    if args.ollama_timeout_seconds is not None:
+        try:
+            from ollama import Client
+
+            client = Client(host=args.ollama_host, timeout=args.ollama_timeout_seconds)
+            return (client, args.llm_model)
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not initialize Ollama client with timeout. "
+                "Install `ollama` and ensure `ollama serve` is reachable."
+            ) from exc
+
     # Preferred: Haystack Ollama integration.
     for import_path in (
         "haystack_integrations.components.generators.ollama",
@@ -685,6 +697,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--ollama-host",
         default=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
         help="Ollama host URL.",
+    )
+    parser.add_argument(
+        "--ollama-timeout-seconds",
+        type=float,
+        default=(
+            float(os.environ["OLLAMA_TIMEOUT_SECONDS"])
+            if os.environ.get("OLLAMA_TIMEOUT_SECONDS")
+            else None
+        ),
+        help=(
+            "Optional Ollama request timeout in seconds. "
+            "When set, run_compare uses the raw Ollama Python client so the timeout is enforced."
+        ),
     )
     parser.add_argument("--temperature", type=float, default=0.0, help="Generation temperature.")
     parser.add_argument("--preview-items", type=int, default=3, help="Context preview item count.")
