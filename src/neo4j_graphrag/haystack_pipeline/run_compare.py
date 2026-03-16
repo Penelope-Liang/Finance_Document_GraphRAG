@@ -51,13 +51,38 @@ class IndexData:
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _ANSWER_PREFIX_RE = re.compile(r"^\s*answer\s*[:：]\s*", flags=re.IGNORECASE)
 
-_ANSWER_ONLY_SYSTEM_INSTRUCTION = (
-    "You are a financial QA assistant. Use only the provided context. "
-    "Return only the final answer text, no JSON."
+# Previous generic answer-only prompt is intentionally kept for reference.
+# _ANSWER_ONLY_SYSTEM_INSTRUCTION = (
+#     "You are a financial QA assistant. Use only the provided context. "
+#     "Return only the final answer text, no JSON."
+# )
+#
+# _ANSWER_ONLY_TEMPLATE = """You are a financial QA expert.
+# Use only the provided financial context.
+#
+# Question:
+# {query_text}
+#
+# Context:
+# {context}
+#
+# Rules:
+# 1. Return only the final answer text in a single concise line.
+# 2. Do not output JSON, markdown, labels, or extra explanation.
+# 3. For metrics questions, compute from context when needed and include units.
+# 4. Do not default to "incomplete context".
+# 5. If at least part of required numeric evidence exists, compute a best-supported numeric answer.
+# 6. Only when no relevant value can be found at all, return exactly: "insufficient evidence".
+#
+# Final answer:
+# """
+
+_METRICS_ONLY_ANSWER_SYSTEM_INSTRUCTION = (
+    "You are a financial QA assistant specialized in metrics-generated questions. "
+    "Use only provided context and return only the final answer text."
 )
 
-_ANSWER_ONLY_TEMPLATE = """You are a financial QA expert.
-Use only the provided financial context.
+_METRICS_ONLY_ANSWER_TEMPLATE = """Task: Answer a FinanceBench metrics-generated question.
 
 Question:
 {query_text}
@@ -66,10 +91,12 @@ Context:
 {context}
 
 Rules:
-1. Return only the final answer text in a single concise line.
-2. Do not output JSON, markdown, labels, or extra explanation.
-3. For metrics questions, compute from context when needed and include units.
-4. If context is incomplete, return the best supported answer and explicitly append: "(incomplete context)".
+1. This is metrics-generated only. Extract and/or calculate numeric answer from context.
+2. Return one concise final answer line only (number + unit when applicable).
+3. Do not output JSON, markdown, or explanations.
+4. If multiple candidate values exist, prefer same company + same fiscal period asked.
+5. If a formula is implied by the question, compute it explicitly from retrieved values.
+6. Only if no relevant numeric value exists in context, return exactly: "insufficient evidence".
 
 Final answer:
 """
@@ -107,6 +134,9 @@ def _parse_answer_only(raw: Any) -> str:
         pass
 
     text = _ANSWER_PREFIX_RE.sub("", text).strip()
+    text = re.sub(r"\s*\(incomplete context\)\s*$", "", text, flags=re.IGNORECASE).strip()
+    if text.lower() in {"incomplete context", "(incomplete context)"}:
+        return "insufficient evidence"
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -694,8 +724,8 @@ def main() -> None:
 
     generator, generator_model = _init_generator(args)
     if args.answer_only:
-        system_instruction = _ANSWER_ONLY_SYSTEM_INSTRUCTION
-        prompt_template_text = _ANSWER_ONLY_TEMPLATE
+        system_instruction = _METRICS_ONLY_ANSWER_SYSTEM_INSTRUCTION
+        prompt_template_text = _METRICS_ONLY_ANSWER_TEMPLATE
     else:
         system_instruction, prompt_template_text = _load_rag_prompt_template()
     modes = ["rag", "graphrag"] if args.mode == "compare" else [args.mode]
