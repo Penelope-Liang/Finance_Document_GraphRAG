@@ -90,6 +90,17 @@ Question:
 Context:
 {context}
 
+Question type note:
+- metrics-generated means the question asks for specific financial figures/metrics from statements,
+  or direct numeric computation based on those figures.
+
+Worked example (metrics-generated):
+Question:
+How much (in USD billions) did American Water Works pay out in cash dividends for FY2020?
+Compute or extract the answer by primarily using the details outlined in the statement of cash flows.
+Answer:
+$0.40
+
 Rules:
 1. This is metrics-generated only. Extract and/or calculate numeric answer from context.
 2. Return one concise final answer line only (number + unit when applicable).
