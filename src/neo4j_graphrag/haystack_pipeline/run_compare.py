@@ -123,10 +123,19 @@ Rules:
 4. For calculation questions, infer the formula from the current question itself and compute it from retrieved values.
 5. Do not reuse a formula from the examples unless the current question explicitly requires that same formula.
 6. The examples above only illustrate question types; they do not define the formula for other questions.
-7. Return one concise final answer line only (number + unit when applicable).
-8. Do not output JSON, markdown, or explanations.
-9. If multiple candidate values exist, prefer same company + same fiscal period asked.
-10. Only if no relevant numeric value exists in context, return exactly: "insufficient evidence".
+7. If you can answer, output only the final numeric answer, with no explanation text.
+8. Keep the output machine-parsable:
+   - good: 1577.00
+   - good: $1577.00
+   - good: 24.26
+   - good: -0.07
+   - good: 13.4%
+   - bad: "The answer is 1577.00"
+   - bad: "Based on the context, 24.26"
+   - bad: full sentences or reasoning
+9. Do not output JSON, markdown, labels, or explanations.
+10. If multiple candidate values exist, prefer same company + same fiscal period asked.
+11. Only if no relevant numeric value exists in context, return exactly: "insufficient evidence".
 
 Final answer:
 """
