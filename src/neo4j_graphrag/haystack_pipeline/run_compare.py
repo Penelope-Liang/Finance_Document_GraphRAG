@@ -108,23 +108,51 @@ FINAL_ANSWER: <single number, optionally with $ or %>
 2. Match the EXACT fiscal year(s) requested. FY2018 means the fiscal year ending in 2018.
 3. Pay attention to units in the question:
    - "in USD millions" means your answer should be in millions (e.g. 5409, not 5.409 billion).
-   - "in USD billions" means your answer should be in billions.
+   - "in USD billions" means your answer should be in billions (e.g. 4.6, not 4600 million).
    - "in units of percents" means output a percentage number (e.g. 39.7, not 0.397).
-4. For ratios and percentages:
+4. CRITICAL - Output format for ratios vs percentages:
+   - If the question asks for a RATIO (e.g. "working capital ratio", "operating cash flow ratio", "payout ratio"),
+     output as a plain decimal (e.g. 1.73, 0.66, 0.80). Do NOT multiply by 100.
+   - If the question asks for a PERCENTAGE or "% margin" or "as a %" or "in units of percents",
+     output as a percentage number (e.g. 39.7, 5.2). This IS multiplied by 100.
+   - ROA, ROE: if the question says "ROA" without specifying units, output as a decimal ratio (e.g. 0.01, not 1.0).
+     If the question says "ROA in %" or "ROA as a percentage", then multiply by 100.
+   - Dividend payout ratio = Total dividends / Net income. This is a RATIO, output as decimal (e.g. 0.80, not 80).
+   - CAGR: if question says "in units of percents", output percentage (e.g. 0.4). Otherwise decimal.
+5. Formula definitions (use these EXACTLY when the question references them):
    - COGS % margin = COGS / Revenue * 100
+   - Gross profit margin = (Revenue - COGS) / Revenue * 100.  NOTE: COGS margin != Gross margin.
    - Net profit margin = Net income / Revenue * 100
-   - ROA = Net income / Average total assets (if question says FY2017 ROA, use average of FY2016 and FY2017 total assets)
+   - ROA = Net income / Average total assets. Average = (FY_prev + FY_current) / 2.
    - Operating cash flow ratio = Cash from operations / Total current liabilities
    - Fixed asset turnover = Revenue / Average PP&E
+   - DSO = 365 * Average accounts receivable / Revenue
+   - DIO = 365 * Average inventory / COGS
    - DPO = 365 * Average accounts payable / (COGS + change in inventory)
+   - CCC = DIO + DSO - DPO. NOTE: CCC can be negative.
    - YoY change = (New - Old) / |Old| * 100
+   - CAGR = ((End / Start) ^ (1 / years) - 1) * 100  (if answer in percents)
    - Working capital ratio = Total current assets / Total current liabilities
-5. For multi-year averages: compute each year's value, then average them.
-6. Double-check: does your answer's magnitude make sense? A margin should be 0-100%, a ratio typically 0-50, revenue in millions is typically 1,000-500,000.
-7. If the question says "round to X decimal places", do so.
-8. Return "FINAL_ANSWER: insufficient evidence" only when the context contains NO relevant numeric data at all.
+   - Dividend payout ratio = Total cash dividends paid / Net income (this is a ratio, NOT a percentage)
+   - EBITDA = Operating income + Depreciation & Amortization
+   - EBITDA % margin = EBITDA / Revenue * 100
+6. For multi-year averages: compute each year's value separately, then average them.
+7. SANITY CHECK (mandatory before giving final answer):
+   - Margins (COGS%, gross%, net%, EBITDA%): must be between -50% and 100%. If outside, recheck.
+   - Ratios (working capital, current, cash flow): typically 0.1 to 10. If >50 or <0, recheck.
+   - ROA/ROE as decimal: typically -0.5 to 0.5. If >5, you likely forgot to divide by total assets.
+   - Dividend payout ratio: typically 0 to 2.0. If >10, you likely multiplied by 100 when you shouldn't.
+   - YoY change %: typically -80% to +200%. If >500%, recheck values.
+   - Revenue/assets in millions: typically 100 to 500,000. If <1 or >10,000,000, check units.
+   - If your answer fails sanity check, go back to STEP 1 and verify each extracted value.
+8. If the question says "round to X decimal places", do so.
+9. When extracting from balance sheets: "year end FY2019" means the balance as of the END of fiscal year 2019.
+   For companies with Jan fiscal year end (e.g. Best Buy, Walmart), FY2019 ends in Jan/Feb 2020.
+   Look for the LATER date column in the balance sheet.
+10. For "net" values (net AR, net PP&E): use the value AFTER deducting allowances/depreciation, not gross.
+11. Return "FINAL_ANSWER: insufficient evidence" only when the context contains NO relevant numeric data at all.
 
-=== WORKED EXAMPLE ===
+=== WORKED EXAMPLE A (ratio) ===
 
 Question: What is the FY2019 fixed asset turnover ratio for Activision Blizzard?
 Defined as: FY2019 revenue / (average PP&E between FY2018 and FY2019). Round to two decimal places.
@@ -138,9 +166,27 @@ STEP 2 - Formula:
 Fixed asset turnover = Revenue / Average PP&E
 Average PP&E = (253 + 282) / 2 = 267.5
 Ratio = 6489 / 267.5 = 24.26
+Sanity check: fixed asset turnover of 24.26 is high but plausible for a software company with little PP&E. OK.
 
 STEP 3 - Final answer:
 FINAL_ANSWER: 24.26
+
+=== WORKED EXAMPLE B (YoY % change) ===
+
+Question: What is the year-over-year change in revenue from FY2016 to FY2017 (in units of percents)?
+
+STEP 1 - Identify line items:
+ITEM: Revenue | YEAR: FY2016 | VALUE: 135987 | UNIT: USD millions
+ITEM: Revenue | YEAR: FY2017 | VALUE: 177866 | UNIT: USD millions
+
+STEP 2 - Formula:
+YoY change = (New - Old) / |Old| * 100
+= (177866 - 135987) / 135987 * 100
+= 41879 / 135987 * 100 = 30.8%
+Sanity check: 30.8% revenue growth is plausible. OK.
+
+STEP 3 - Final answer:
+FINAL_ANSWER: 30.8%
 
 === NOW ANSWER THE QUESTION ===
 """
