@@ -79,10 +79,10 @@ _ANSWER_PREFIX_RE = re.compile(r"^\s*answer\s*[:：]\s*", flags=re.IGNORECASE)
 
 _METRICS_ONLY_ANSWER_SYSTEM_INSTRUCTION = (
     "You are a financial QA assistant specialized in metrics-generated questions. "
-    "Use only provided context and return only the final answer text."
+    "Use only provided context. Follow the output format exactly."
 )
 
-_METRICS_ONLY_ANSWER_TEMPLATE = """Task: Answer a FinanceBench metrics-generated question.
+_METRICS_ONLY_ANSWER_TEMPLATE = """Task: Answer a FinanceBench metrics-generated question using ONLY the provided context.
 
 Question:
 {query_text}
@@ -90,54 +90,59 @@ Question:
 Context:
 {context}
 
-Question type note:
-- metrics-generated means the question asks for specific financial figures/metrics from statements,
-  or direct numeric computation based on those figures.
+=== OUTPUT FORMAT (follow exactly) ===
 
-Worked example A (direct extraction):
-Question:
-How much (in USD billions) did American Water Works pay out in cash dividends for FY2020?
-Compute or extract the answer by primarily using the details outlined in the statement of cash flows.
-Answer:
-$0.40
+STEP 1 - Identify line items:
+List each numeric value you need. For EACH value write exactly one line:
+  ITEM: <line item name> | YEAR: <fiscal year> | VALUE: <number> | UNIT: <USD millions / USD billions / percent / ratio / plain>
 
-Worked example B (calculation):
-Question:
-What is the FY2019 fixed asset turnover ratio for Activision Blizzard? Fixed asset turnover ratio is defined as:
-FY2019 revenue / (average PP&E between FY2018 and FY2019). Round your answer to two decimal places.
-Base your judgments on the information provided primarily in the statement of income and the statement of financial position.
-Answer:
-24.26
-Supporting idea:
-- This is a calculation question, not direct extraction.
-- The simpler metrics used are:
-  Metric 1: Total revenue. Located as line item "Total net revenues".
-  Metric 2: PP&E, net. Located as line item "Property and equipment, net".
+STEP 2 - Formula (skip if direct extraction):
+Write the formula using the item names above, then show the arithmetic step by step.
 
-Rules:
-1. This is metrics-generated only.
-2. First decide whether the question is:
-   - a direct extraction question, where the answer is stated explicitly in context; or
-   - a calculation question, where the answer must be computed from simpler values in context.
-3. For direct extraction questions, return the stated value directly.
-4. For calculation questions, infer the formula from the current question itself and compute it from retrieved values.
-5. Do not reuse a formula from the examples unless the current question explicitly requires that same formula.
-6. The examples above only illustrate question types; they do not define the formula for other questions.
-7. If you can answer, output only the final numeric answer, with no explanation text.
-8. Keep the output machine-parsable:
-   - good: 1577.00
-   - good: $1577.00
-   - good: 24.26
-   - good: -0.07
-   - good: 13.4%
-   - bad: "The answer is 1577.00"
-   - bad: "Based on the context, 24.26"
-   - bad: full sentences or reasoning
-9. Do not output JSON, markdown, labels, or explanations.
-10. If multiple candidate values exist, prefer same company + same fiscal period asked.
-11. Only if no relevant numeric value exists in context, return exactly: "insufficient evidence".
+STEP 3 - Final answer:
+FINAL_ANSWER: <single number, optionally with $ or %>
 
-Final answer:
+=== RULES ===
+
+1. Extract values ONLY for the specific company asked about. Ignore other companies in context.
+2. Match the EXACT fiscal year(s) requested. FY2018 means the fiscal year ending in 2018.
+3. Pay attention to units in the question:
+   - "in USD millions" means your answer should be in millions (e.g. 5409, not 5.409 billion).
+   - "in USD billions" means your answer should be in billions.
+   - "in units of percents" means output a percentage number (e.g. 39.7, not 0.397).
+4. For ratios and percentages:
+   - COGS % margin = COGS / Revenue * 100
+   - Net profit margin = Net income / Revenue * 100
+   - ROA = Net income / Average total assets (if question says FY2017 ROA, use average of FY2016 and FY2017 total assets)
+   - Operating cash flow ratio = Cash from operations / Total current liabilities
+   - Fixed asset turnover = Revenue / Average PP&E
+   - DPO = 365 * Average accounts payable / (COGS + change in inventory)
+   - YoY change = (New - Old) / |Old| * 100
+   - Working capital ratio = Total current assets / Total current liabilities
+5. For multi-year averages: compute each year's value, then average them.
+6. Double-check: does your answer's magnitude make sense? A margin should be 0-100%, a ratio typically 0-50, revenue in millions is typically 1,000-500,000.
+7. If the question says "round to X decimal places", do so.
+8. Return "FINAL_ANSWER: insufficient evidence" only when the context contains NO relevant numeric data at all.
+
+=== WORKED EXAMPLE ===
+
+Question: What is the FY2019 fixed asset turnover ratio for Activision Blizzard?
+Defined as: FY2019 revenue / (average PP&E between FY2018 and FY2019). Round to two decimal places.
+
+STEP 1 - Identify line items:
+ITEM: Total net revenues | YEAR: FY2019 | VALUE: 6489 | UNIT: USD millions
+ITEM: Property and equipment, net | YEAR: FY2018 | VALUE: 253 | UNIT: USD millions
+ITEM: Property and equipment, net | YEAR: FY2019 | VALUE: 282 | UNIT: USD millions
+
+STEP 2 - Formula:
+Fixed asset turnover = Revenue / Average PP&E
+Average PP&E = (253 + 282) / 2 = 267.5
+Ratio = 6489 / 267.5 = 24.26
+
+STEP 3 - Final answer:
+FINAL_ANSWER: 24.26
+
+=== NOW ANSWER THE QUESTION ===
 """
 
 
@@ -155,12 +160,29 @@ def _tokenize(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
 
 
+_FINAL_ANSWER_RE = re.compile(
+    r"FINAL[_ ]?ANSWER\s*[:：]\s*(.+)",
+    flags=re.IGNORECASE,
+)
+
+
 def _parse_answer_only(raw: Any) -> str:
     if raw is None:
         return ""
     text = strip_json_fence(str(raw).strip())
     if not text:
         return ""
+
+    # Prefer FINAL_ANSWER: line if present (structured prompt output).
+    for line in reversed(text.splitlines()):
+        m = _FINAL_ANSWER_RE.search(line.strip())
+        if m:
+            val = m.group(1).strip()
+            if val.lower() in {"insufficient evidence", "none", "n/a"}:
+                return "insufficient evidence"
+            val = re.sub(r"\s+", " ", val).strip()
+            if val:
+                return val
 
     # Allow fallback if the model still returns JSON.
     try:
@@ -177,6 +199,11 @@ def _parse_answer_only(raw: Any) -> str:
     if text.lower() in {"incomplete context", "(incomplete context)"}:
         return "insufficient evidence"
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _clip_for_generation(text: str, max_chars: int) -> str:
+    limit = max(1, int(max_chars))
+    return truncate_text(text, limit)
 
 
 def _import_haystack_text_embedder():
@@ -729,6 +756,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preview-items", type=int, default=3, help="Context preview item count.")
     parser.add_argument("--preview-chars", type=int, default=500, help="Context preview char limit.")
     parser.add_argument(
+        "--max-context-chars",
+        type=int,
+        default=48000,
+        help="Maximum characters passed to the generator as context.",
+    )
+    parser.add_argument(
+        "--graphrag-block-chars",
+        type=int,
+        default=2000,
+        help=(
+            "Per-item character cap for GraphRAG expanded blocks "
+            "(previous/chunk/next) before joining final context."
+        ),
+    )
+    parser.add_argument(
         "--evidence-items",
         type=int,
         default=20,
@@ -903,6 +945,7 @@ def main() -> None:
                 chunk_ids = [row["chunk_id"] for row in retrieved_rows]
 
                 evidence_rows = []
+                graphrag_context_blocks: list[str] = []
                 for rank, row in enumerate(retrieved_rows[: max(0, args.evidence_items)], start=1):
                     pos = int(row["pos"])
                     text_for_mode = row["text"]
@@ -915,6 +958,9 @@ def main() -> None:
                         if next_pos is not None:
                             parts.append(f"[Next]\n{index_data.docs[next_pos].content}")
                         text_for_mode = "\n\n".join(parts)
+                        graphrag_context_blocks.append(
+                            _clip_for_generation(text_for_mode, args.graphrag_block_chars)
+                        )
 
                     evidence_rows.append(
                         {
@@ -944,10 +990,9 @@ def main() -> None:
                     if mode == "rag":
                         context_text = "\n".join(row["text"] for row in retrieved_rows)
                     else:
-                        mode_parts: list[str] = []
-                        for row in evidence_rows:
-                            mode_parts.append(row["text_excerpt"])
+                        mode_parts = graphrag_context_blocks or [row["text"] for row in retrieved_rows]
                         context_text = "\n\n".join(mode_parts)
+                    context_text = _clip_for_generation(context_text, args.max_context_chars)
 
                     prompt = prompt_template_text.format(
                         query_text=question,
