@@ -210,6 +210,89 @@ def parse_native_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+_TABLE_LINE_RE = re.compile(
+    r"(?:"
+    r"[\$\(]?\d[\d,]*\.?\d*\)?"  # a number, possibly with $, commas, parens
+    r"[\s\$\(]*"
+    r"){2,}"  # at least 2 such number groups on one line
+)
+
+
+def _is_table_line(line: str) -> bool:
+    """Heuristic: a line with 2+ number groups is likely a financial table row."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    return bool(_TABLE_LINE_RE.search(stripped))
+
+
+def split_with_table_boundary(
+    text: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    max_table_chunk: int = 4000,
+    approximate: bool = True,
+) -> list[str]:
+    """Split text preserving financial table boundaries.
+
+    Scans lines for table-like regions (rows with multiple numbers).
+    Consecutive table lines + preceding header lines are kept as one chunk.
+    Non-table text is split using fixed-size splitting.
+    """
+    lines = text.split("\n")
+    chunks: list[str] = []
+    text_buffer: list[str] = []
+
+    def flush_text_buffer() -> None:
+        nonlocal text_buffer
+        if not text_buffer:
+            return
+        buf_text = "\n".join(text_buffer).strip()
+        text_buffer = []
+        if not buf_text:
+            return
+        for chunk in split_fixed_size(buf_text, chunk_size, chunk_overlap, approximate):
+            chunks.append(chunk)
+
+    i = 0
+    while i < len(lines):
+        if _is_table_line(lines[i]):
+            header_lines: list[str] = []
+            for back in range(min(3, len(text_buffer)), 0, -1):
+                candidate = text_buffer[-back].strip()
+                if candidate and not _is_table_line(candidate):
+                    header_lines = list(text_buffer[-back:])
+                    text_buffer = text_buffer[:-back]
+                    break
+
+            flush_text_buffer()
+
+            table_lines = list(header_lines)
+            while i < len(lines) and (_is_table_line(lines[i]) or not lines[i].strip()):
+                table_lines.append(lines[i])
+                i += 1
+            while i < len(lines) and lines[i].strip() and not _is_table_line(lines[i]):
+                next_check = min(i + 1, len(lines) - 1)
+                if next_check < len(lines) and _is_table_line(lines[next_check]):
+                    table_lines.append(lines[i])
+                    i += 1
+                else:
+                    break
+
+            table_text = "\n".join(table_lines).strip()
+            if len(table_text) <= max_table_chunk:
+                chunks.append(table_text)
+            else:
+                for part in split_fixed_size(table_text, max_table_chunk, chunk_overlap, approximate):
+                    chunks.append(part)
+        else:
+            text_buffer.append(lines[i])
+            i += 1
+
+    flush_text_buffer()
+    return [c for c in chunks if c.strip()]
+
+
 def split_fixed_size(
     text: str, chunk_size: int, chunk_overlap: int, approximate: bool = True
 ) -> list[str]:
@@ -394,9 +477,19 @@ def _split_section_text_for_item10k(
     max_characters: int,
     new_after_n_chars: int,
     overlap: int,
+    use_table_boundary: bool = False,
+    max_table_chunk: int = 4000,
 ) -> list[str]:
     target_size = max(1, min(max_characters, new_after_n_chars))
     safe_overlap = max(0, min(overlap, target_size - 1))
+    if use_table_boundary:
+        return split_with_table_boundary(
+            text=text,
+            chunk_size=target_size,
+            chunk_overlap=safe_overlap,
+            max_table_chunk=max_table_chunk,
+            approximate=True,
+        )
     return split_fixed_size(
         text=text,
         chunk_size=target_size,
@@ -465,6 +558,8 @@ def parse_and_chunk_item10k(elements: list[Any], args: argparse.Namespace) -> li
             max_characters=args.unstructured_max_characters,
             new_after_n_chars=args.unstructured_new_after_n_chars,
             overlap=args.unstructured_overlap,
+            use_table_boundary=getattr(args, "table_boundary", False),
+            max_table_chunk=getattr(args, "max_table_chunk", 4000),
         )
         for chunk_text in chunks:
             if not chunk_text.strip():
@@ -564,25 +659,36 @@ def parse_and_chunk_unstructured(path: Path, args: argparse.Namespace) -> list[P
     # by_title / basic strategy for non-PDF or fallback
     # For PDFs we already have FakeElements so we do a simple fixed split
     if ext == ".pdf":
-        # Flatten all page text and split with fixed size
         full_text = "\n\n".join(
             (getattr(e, "text", "") or "").strip()
             for e in elements
             if (getattr(e, "text", "") or "").strip()
         )
-        chunks_text = split_fixed_size(
-            full_text,
-            chunk_size=args.unstructured_max_characters,
-            chunk_overlap=args.unstructured_overlap,
-            approximate=True,
-        )
+        use_table_boundary = getattr(args, "table_boundary", False)
+        if use_table_boundary:
+            chunks_text = split_with_table_boundary(
+                full_text,
+                chunk_size=args.unstructured_max_characters,
+                chunk_overlap=args.unstructured_overlap,
+                max_table_chunk=getattr(args, "max_table_chunk", 4000),
+                approximate=True,
+            )
+            engine_name = "table_boundary"
+        else:
+            chunks_text = split_fixed_size(
+                full_text,
+                chunk_size=args.unstructured_max_characters,
+                chunk_overlap=args.unstructured_overlap,
+                approximate=True,
+            )
+            engine_name = "fixed"
         return [
             ParsedChunk(
                 text=chunk_text,
                 section_name="",
                 page=None,
                 metadata={"filename": path.name},
-                chunk_engine="fixed",
+                chunk_engine=engine_name,
                 parser_engine="pymupdf",
             )
             for chunk_text in chunks_text
@@ -738,6 +844,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         help="Fail fast on first file error.",
+    )
+    parser.add_argument(
+        "--table-boundary",
+        action="store_true",
+        help="Use table boundary detection to keep financial tables intact.",
+    )
+    parser.add_argument(
+        "--max-table-chunk",
+        type=int,
+        default=4000,
+        help="Maximum characters for a single table chunk.",
     )
     return parser
 
