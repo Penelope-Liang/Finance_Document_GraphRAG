@@ -78,19 +78,19 @@ def _count_table_rows(text: str) -> int:
             continue
         if _LIKELY_NOISE_RE.search(s):
             continue
-        # Require explicit column separators to avoid narrative sentences with years/percents.
-        if not _COL_SEP_RE.search(s):
-            continue
         nums = _NUM_TOKEN_RE.findall(s)
-        if len(nums) >= 2:
+        # Prefer explicit column separators (tabs / 2+ spaces), but allow very
+        # number-dense lines without separators (common in PDF-extracted tables).
+        has_sep = bool(_COL_SEP_RE.search(s))
+        if (has_sep and len(nums) >= 2) or (len(nums) >= 4):
             rows += 1
     return rows
 
 
 def _is_table_like_chunk(text: str) -> bool:
-    # At least 4 table-like rows is a strong signal for a financial statement snippet.
-    # This keeps false positives low even in number-heavy documents.
-    return _count_table_rows(text) >= 4
+    # Use a moderate threshold so we actually trigger on statement fragments.
+    # False positives are contained by the neighbor-expansion stop condition.
+    return _count_table_rows(text) >= 3
 
 
 def _expand_table_block(
@@ -107,14 +107,15 @@ def _expand_table_block(
     if not ordered:
         return [pos]
     center_ord = index_data.pos_ordinal_by_pos[pos]
-    # Expand outwards while chunks remain table-like.
+    # Expand outwards while chunks remain table-like (or near table-like).
     left = center_ord
     right = center_ord
     # Walk left
     steps = 0
     while left - 1 >= 0 and steps < max_neighbors_each_side:
         cand_pos = ordered[left - 1]
-        if _is_table_like_chunk(index_data.docs[cand_pos].content):
+        cand_text = index_data.docs[cand_pos].content
+        if _is_table_like_chunk(cand_text) or _count_table_rows(cand_text) >= 2:
             left -= 1
             steps += 1
             continue
@@ -123,7 +124,8 @@ def _expand_table_block(
     steps = 0
     while right + 1 < len(ordered) and steps < max_neighbors_each_side:
         cand_pos = ordered[right + 1]
-        if _is_table_like_chunk(index_data.docs[cand_pos].content):
+        cand_text = index_data.docs[cand_pos].content
+        if _is_table_like_chunk(cand_text) or _count_table_rows(cand_text) >= 2:
             right += 1
             steps += 1
             continue
