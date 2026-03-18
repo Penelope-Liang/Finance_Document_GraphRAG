@@ -46,10 +46,95 @@ class IndexData:
     positions_by_doc_key: dict[str, list[int]]
     neighbor_by_pos: dict[int, tuple[Optional[int], Optional[int]]]
     pos_by_doc_key: dict[str, list[int]]
+    pos_ordinal_by_pos: dict[int, int]
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _ANSWER_PREFIX_RE = re.compile(r"^\s*answer\s*[:：]\s*", flags=re.IGNORECASE)
+
+# Table-aware context expansion (GraphRAG).
+#
+# Goal: when retrieval hits a financial table chunk that was cut mid-table,
+# automatically pull adjacent chunks from the same document until the table ends.
+#
+# This is intentionally heuristic and biased toward low false positives:
+# - Require multi-column numeric rows with clear column separation (2+ spaces / tabs)
+# - Require multiple such rows per chunk
+_NUM_TOKEN_RE = re.compile(
+    r"(?:\(\s*)?\$?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?%?(?:\s*\))?",
+    flags=re.IGNORECASE,
+)
+_COL_SEP_RE = re.compile(r"(?:\t| {2,})")
+_LIKELY_NOISE_RE = re.compile(
+    r"(?i)\b(page|item\s+\d+|form\s+10-?k|form\s+10-?q|table of contents|commission file number)\b"
+)
+
+
+def _count_table_rows(text: str) -> int:
+    rows = 0
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if _LIKELY_NOISE_RE.search(s):
+            continue
+        # Require explicit column separators to avoid narrative sentences with years/percents.
+        if not _COL_SEP_RE.search(s):
+            continue
+        nums = _NUM_TOKEN_RE.findall(s)
+        if len(nums) >= 2:
+            rows += 1
+    return rows
+
+
+def _is_table_like_chunk(text: str) -> bool:
+    # At least 4 table-like rows is a strong signal for a financial statement snippet.
+    # This keeps false positives low even in number-heavy documents.
+    return _count_table_rows(text) >= 4
+
+
+def _expand_table_block(
+    *,
+    index_data: IndexData,
+    pos: int,
+    max_neighbors_each_side: int = 6,
+) -> list[int]:
+    """Return positions for a contiguous table region around pos within same doc."""
+    if pos not in index_data.pos_ordinal_by_pos:
+        return [pos]
+    doc = index_data.docs[pos]
+    ordered = index_data.positions_by_doc_key.get(doc_key(doc.doc_id), [])
+    if not ordered:
+        return [pos]
+    center_ord = index_data.pos_ordinal_by_pos[pos]
+    # Expand outwards while chunks remain table-like.
+    left = center_ord
+    right = center_ord
+    # Walk left
+    steps = 0
+    while left - 1 >= 0 and steps < max_neighbors_each_side:
+        cand_pos = ordered[left - 1]
+        if _is_table_like_chunk(index_data.docs[cand_pos].content):
+            left -= 1
+            steps += 1
+            continue
+        break
+    # Walk right
+    steps = 0
+    while right + 1 < len(ordered) and steps < max_neighbors_each_side:
+        cand_pos = ordered[right + 1]
+        if _is_table_like_chunk(index_data.docs[cand_pos].content):
+            right += 1
+            steps += 1
+            continue
+        break
+    # Optionally include one header chunk immediately before the table region.
+    if left - 1 >= 0:
+        header_pos = ordered[left - 1]
+        header_text = index_data.docs[header_pos].content
+        if not _is_table_like_chunk(header_text) and len(header_text) <= 900:
+            left -= 1
+    return ordered[left : right + 1]
 
 # Previous generic answer-only prompt is intentionally kept for reference.
 # _ANSWER_ONLY_SYSTEM_INSTRUCTION = (
@@ -321,6 +406,7 @@ def _load_index(path: Path) -> IndexData:
         raise ValueError(f"No documents loaded from {path}")
 
     neighbor_by_pos: dict[int, tuple[Optional[int], Optional[int]]] = {}
+    pos_ordinal_by_pos: dict[int, int] = {}
     for key, positions in positions_by_doc_key.items():
         ordered = sorted(positions, key=lambda p: (docs[p].chunk_index, docs[p].id))
         positions_by_doc_key[key] = ordered
@@ -328,6 +414,7 @@ def _load_index(path: Path) -> IndexData:
             prev_pos = ordered[idx - 1] if idx > 0 else None
             next_pos = ordered[idx + 1] if idx < len(ordered) - 1 else None
             neighbor_by_pos[pos] = (prev_pos, next_pos)
+            pos_ordinal_by_pos[pos] = idx
 
     matrix = np.vstack(matrix_rows).astype(np.float32)
     return IndexData(
@@ -336,6 +423,7 @@ def _load_index(path: Path) -> IndexData:
         positions_by_doc_key=positions_by_doc_key,
         neighbor_by_pos=neighbor_by_pos,
         pos_by_doc_key=pos_by_doc_key,
+        pos_ordinal_by_pos=pos_ordinal_by_pos,
     )
 
 
@@ -996,14 +1084,22 @@ def main() -> None:
                     pos = int(row["pos"])
                     text_for_mode = row["text"]
                     if mode == "graphrag":
-                        prev_pos, next_pos = index_data.neighbor_by_pos.get(pos, (None, None))
                         parts: list[str] = []
-                        if prev_pos is not None:
-                            parts.append(f"[Previous]\n{index_data.docs[prev_pos].content}")
-                        parts.append(f"[Chunk]\n{row['text']}")
-                        if next_pos is not None:
-                            parts.append(f"[Next]\n{index_data.docs[next_pos].content}")
-                        text_for_mode = "\n\n".join(parts)
+                        center_text = row["text"]
+                        if _is_table_like_chunk(center_text):
+                            expanded_positions = _expand_table_block(index_data=index_data, pos=pos)
+                            for ppos in expanded_positions:
+                                tag = "Chunk" if ppos == pos else "Neighbor"
+                                pdoc = index_data.docs[ppos]
+                                parts.append(f"[{tag} doc={pdoc.doc_id} idx={pdoc.chunk_index}]\n{pdoc.content}")
+                        else:
+                            prev_pos, next_pos = index_data.neighbor_by_pos.get(pos, (None, None))
+                            if prev_pos is not None:
+                                parts.append(f"[Previous]\n{index_data.docs[prev_pos].content}")
+                            parts.append(f"[Chunk]\n{center_text}")
+                            if next_pos is not None:
+                                parts.append(f"[Next]\n{index_data.docs[next_pos].content}")
+                        text_for_mode = "\n\n".join(parts) if parts else center_text
                         graphrag_context_blocks.append(
                             _clip_for_generation(text_for_mode, args.graphrag_block_chars)
                         )
