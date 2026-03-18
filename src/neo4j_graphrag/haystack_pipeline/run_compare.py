@@ -197,6 +197,10 @@ FINAL_ANSWER: <single number, optionally with $ or %>
    - "in USD millions" means your answer should be in millions (e.g. 5409, not 5.409 billion).
    - "in USD billions" means your answer should be in billions (e.g. 4.6, not 4600 million).
    - "in units of percents" means output a percentage number (e.g. 39.7, not 0.397).
+   - Conversion reminder (SEC tables often state the table is in "USD millions"):
+     - If the evidence/table says USD millions but the question asks USD billions: divide by 1000.
+     - If the evidence/table says USD billions but the question asks USD millions: multiply by 1000.
+     - If the evidence/table says USD thousands but the question asks USD millions: divide by 1000.
 4. CRITICAL - Output format for ratios vs percentages:
    - If the question asks for a RATIO (e.g. "working capital ratio", "operating cash flow ratio", "payout ratio"),
      output as a plain decimal (e.g. 1.73, 0.66, 0.80). Do NOT multiply by 100.
