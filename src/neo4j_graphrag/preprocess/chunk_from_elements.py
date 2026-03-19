@@ -81,6 +81,11 @@ class ChunkBuffer:
             page_start=page_start,
             is_toc_like=is_toc_like,
         )
+        is_appendix_like = _is_appendix_like_chunk(
+            section_name=self.section_name,
+            title_text=self.title_text,
+            text=preview_text,
+        )
         return {
             "page_start": page_start,
             "page_end": page_end,
@@ -92,7 +97,8 @@ class ChunkBuffer:
             "title_text": self.title_text or "",
             "is_toc_like": is_toc_like,
             "is_front_matter": is_front_matter,
-            "should_index": not (is_toc_like or is_front_matter),
+            "is_appendix_like": is_appendix_like,
+            "should_index": not (is_toc_like or is_front_matter or is_appendix_like),
         }
 
 
@@ -240,6 +246,47 @@ def _is_front_matter_chunk(
             or "index to financial statements" in clean
         ):
             return True
+    return False
+
+
+def _is_appendix_like_chunk(*, section_name: str, title_text: str, text: str) -> bool:
+    combined = " ".join(
+        part.strip().lower()
+        for part in (section_name or "", title_text or "", text or "")
+        if part and part.strip()
+    )
+    if not combined:
+        return False
+
+    strong_signals = (
+        "award agreement",
+        "deferred stock unit award agreement",
+        "taxation and tax withholding",
+        "nonemployee director",
+        "long-term incentive plan",
+        "stock unit award agreement",
+    )
+    if any(sig in combined for sig in strong_signals):
+        return True
+
+    weak_hits = sum(
+        1
+        for sig in (
+            "agreement",
+            "appendix",
+            "exhibit",
+            "plan",
+            "participant",
+            "grant date",
+            "vesting date",
+            "tax-related items",
+            "administrator",
+        )
+        if sig in combined
+    )
+    if weak_hits >= 3:
+        return True
+
     return False
 
 
