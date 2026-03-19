@@ -189,6 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip rows that already have keywords and summary in metadata.",
     )
     parser.add_argument(
+        "--only-should-index",
+        action="store_true",
+        help="Only enrich rows whose metadata.should_index is true.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Fail fast on first LLM/parsing error.",
@@ -234,6 +239,10 @@ def main() -> None:
         if not isinstance(metadata, dict):
             metadata = {}
             row["metadata"] = metadata
+
+        if args.only_should_index and not bool(metadata.get("should_index")):
+            skipped += 1
+            continue
 
         if args.skip_existing and metadata.get("keywords") and metadata.get("summary"):
             skipped += 1
