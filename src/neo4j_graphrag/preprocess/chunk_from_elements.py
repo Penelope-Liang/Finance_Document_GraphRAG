@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+import re
 
 from neo4j_graphrag.preprocess.ingest_chunks import (
     compute_chunk_id,
@@ -13,7 +14,8 @@ from neo4j_graphrag.preprocess.ingest_chunks import (
 )
 
 
-KEEP_CATEGORIES = {"Title", "NarrativeText", "Table", "ListItem", "UncategorizedText"}
+KEEP_CATEGORIES = {"Title", "NarrativeText", "Table", "ListItem"}
+OPTIONAL_CATEGORIES = {"UncategorizedText"}
 
 
 @dataclass
@@ -32,6 +34,7 @@ class ElementRow:
 class ChunkBuffer:
     doc_id: str
     section_name: str = ""
+    title_text: str = ""
     texts: list[str] = field(default_factory=list)
     element_indices: list[int] = field(default_factory=list)
     element_types: list[str] = field(default_factory=list)
@@ -70,6 +73,14 @@ class ChunkBuffer:
         page_start = min(self.pages) if self.pages else None
         page_end = max(self.pages) if self.pages else None
         bbox_union = _merge_bboxes(self.bboxes)
+        preview_text = self.build_text()
+        is_toc_like = _is_toc_like_text(preview_text, self.is_table)
+        is_front_matter = _is_front_matter_chunk(
+            section_name=self.section_name,
+            text=preview_text,
+            page_start=page_start,
+            is_toc_like=is_toc_like,
+        )
         return {
             "page_start": page_start,
             "page_end": page_end,
@@ -78,6 +89,10 @@ class ChunkBuffer:
             "is_table": self.is_table,
             "bbox_union": bbox_union,
             "table_html": self.table_html,
+            "title_text": self.title_text or "",
+            "is_toc_like": is_toc_like,
+            "is_front_matter": is_front_matter,
+            "should_index": not (is_toc_like or is_front_matter),
         }
 
 
@@ -124,10 +139,67 @@ def _is_noise(row: ElementRow, min_text_len: int) -> bool:
     text = row.text.strip()
     if not text:
         return True
-    if row.category not in KEEP_CATEGORIES:
+    if row.category in KEEP_CATEGORIES:
+        return False
+    if row.category in OPTIONAL_CATEGORIES and len(text) < min_text_len:
         return True
-    if row.category == "UncategorizedText" and len(text) < min_text_len:
+    if row.category in OPTIONAL_CATEGORIES:
+        return False
+    return True
+
+
+def _looks_like_substantive_uncategorized(text: str, min_text_len: int) -> bool:
+    clean = text.strip()
+    if len(clean) < min_text_len:
+        return False
+    if len(clean.split()) >= 4:
         return True
+    return bool(re.search(r"[.:;,\d$%]", clean))
+
+
+def _is_toc_like_text(text: str, is_table: bool) -> bool:
+    clean = " ".join((text or "").split()).lower()
+    if not clean:
+        return False
+    if "table of contents" in clean or "beginning page" in clean:
+        return True
+    item_hits = len(re.findall(r"\bitem\s+\d+[a-z]?\b", clean))
+    note_hits = len(re.findall(r"\bnote\s+\d+\b", clean))
+    page_number_hits = len(re.findall(r"\b\d{1,3}\b", clean))
+    if is_table and ((item_hits >= 3) or (note_hits >= 4 and page_number_hits >= 8)):
+        return True
+    if item_hits >= 4 and page_number_hits >= 8:
+        return True
+    return False
+
+
+def _is_front_matter_chunk(
+    *,
+    section_name: str,
+    text: str,
+    page_start: Optional[int],
+    is_toc_like: bool,
+) -> bool:
+    clean = " ".join((text or "").split()).lower()
+    section = (section_name or "").strip().lower()
+    if is_toc_like:
+        return True
+    front_matter_signals = (
+        "united states securities and exchange commission",
+        "form 10-k",
+        "commission file number",
+        "documents incorporated by reference",
+        "indicate by check mark",
+    )
+    if any(x in clean for x in front_matter_signals):
+        return True
+    if any(x in section for x in front_matter_signals):
+        return True
+    if page_start is not None and page_start <= 3:
+        if "yes ☒ no ☐" in clean or "yes ☐ no ☒" in clean:
+            return True
+        if "securities registered pursuant" in clean:
+            return True
     return False
 
 
@@ -222,6 +294,7 @@ def main() -> None:
     buffer: Optional[ChunkBuffer] = None
     chunk_index = 0
     pending_table_record: Optional[dict[str, Any]] = None
+    pending_title: Optional[ElementRow] = None
 
     def flush_buffer() -> None:
         nonlocal buffer, chunk_index
@@ -243,6 +316,11 @@ def main() -> None:
     for row in rows:
         if _is_noise(row, args.min_uncategorized_len):
             continue
+        if row.category == "UncategorizedText" and not _looks_like_substantive_uncategorized(
+            row.text,
+            args.min_uncategorized_len,
+        ):
+            continue
 
         if current_doc != row.doc_id:
             flush_buffer()
@@ -250,17 +328,23 @@ def main() -> None:
             current_section = "UNSPECIFIED"
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
             pending_table_record = None
+            pending_title = None
 
         if row.category == "Title":
             flush_buffer()
             current_section = normalize_section_display(row.text) or row.section_hint or current_section
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
             pending_table_record = None
+            pending_title = row
             continue
 
         if row.category == "Table":
             flush_buffer()
             table_buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
+            if pending_title is not None:
+                table_buffer.title_text = pending_title.text.strip()
+                table_buffer.add(pending_title)
+                pending_title = None
             table_buffer.add(row)
             record = _make_record(
                 buffer=table_buffer,
@@ -293,11 +377,19 @@ def main() -> None:
         pending_table_record = None
         if buffer is None:
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
+        if pending_title is not None and buffer.is_empty:
+            buffer.title_text = pending_title.text.strip()
+            buffer.add(pending_title)
+            pending_title = None
 
         projected = buffer.char_count + len(row.text.strip()) + (2 if buffer.texts else 0)
         if buffer.texts and projected > args.target_max_chars:
             flush_buffer()
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
+            if pending_title is not None and buffer.is_empty:
+                buffer.title_text = pending_title.text.strip()
+                buffer.add(pending_title)
+                pending_title = None
 
         buffer.add(row)
 
