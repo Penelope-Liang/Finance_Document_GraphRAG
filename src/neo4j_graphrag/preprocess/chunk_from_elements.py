@@ -163,12 +163,45 @@ def _is_toc_like_text(text: str, is_table: bool) -> bool:
         return False
     if "table of contents" in clean or "beginning page" in clean:
         return True
+    continued_hits = sum(
+        1
+        for phrase in (
+            "continued",
+            "form 10-k summary",
+            "financial statements and supplementary data",
+            "index to financial statements",
+        )
+        if phrase in clean
+    )
     item_hits = len(re.findall(r"\bitem\s+\d+[a-z]?\b", clean))
     note_hits = len(re.findall(r"\bnote\s+\d+\b", clean))
     page_number_hits = len(re.findall(r"\b\d{1,3}\b", clean))
-    if is_table and ((item_hits >= 3) or (note_hits >= 4 and page_number_hits >= 8)):
+    toc_label_hits = sum(
+        clean.count(label)
+        for label in (
+            "directors, executive officers",
+            "controls and procedures",
+            "executive compensation",
+            "exhibits, financial statement schedules",
+            "certain relationships and related transactions",
+            "principal accounting fees and services",
+            "other information",
+        )
+    )
+    if is_table and (
+        item_hits >= 3
+        or (note_hits >= 4 and page_number_hits >= 8)
+        or (continued_hits >= 1 and page_number_hits >= 6)
+        or (toc_label_hits >= 2 and page_number_hits >= 6)
+    ):
         return True
     if item_hits >= 4 and page_number_hits >= 8:
+        return True
+    if note_hits >= 5 and page_number_hits >= 8:
+        return True
+    if continued_hits >= 1 and (item_hits + note_hits >= 2 or page_number_hits >= 6):
+        return True
+    if toc_label_hits >= 2 and page_number_hits >= 6:
         return True
     return False
 
@@ -199,6 +232,13 @@ def _is_front_matter_chunk(
         if "yes ☒ no ☐" in clean or "yes ☐ no ☒" in clean:
             return True
         if "securities registered pursuant" in clean:
+            return True
+    if page_start is not None and page_start <= 5:
+        if "continued" in clean and (
+            "financial statements and supplementary data" in clean
+            or "form 10-k summary" in clean
+            or "index to financial statements" in clean
+        ):
             return True
     return False
 
