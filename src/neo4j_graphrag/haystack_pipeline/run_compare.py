@@ -69,6 +69,44 @@ _LIKELY_NOISE_RE = re.compile(
     r"(?i)\b(page|item\s+\d+|form\s+10-?k|form\s+10-?q|table of contents|commission file number)\b"
 )
 
+_BALANCE_SHEET_PATTERNS = [
+    "balance sheet",
+    "balance sheets",
+    "statement of financial position",
+    "statements of financial position",
+]
+_CASH_FLOW_PATTERNS = [
+    "cash flow statement",
+    "cash flow statements",
+    "statement of cash flows",
+    "statements of cash flows",
+]
+_INCOME_STATEMENT_PATTERNS = [
+    "income statement",
+    "income statements",
+    "statement of income",
+    "statements of income",
+    "statement of operations",
+    "statements of operations",
+    "p&l statement",
+    "p&l",
+    "profit and loss",
+]
+_LOW_VALUE_SECTION_PATTERNS = [
+    "results of operations",
+    "segment",
+    "guidance",
+    "contractual obligations",
+    "streaming content",
+    "opinion on the financial statements",
+    "opinion",
+    "exhibit",
+    "table of contents",
+    "five-year financial highlights",
+    "selected financial data",
+    "north america",
+]
+
 
 def _count_table_rows(text: str) -> int:
     rows = 0
@@ -91,6 +129,113 @@ def _is_table_like_chunk(text: str) -> bool:
     # Use a moderate threshold so we actually trigger on statement fragments.
     # False positives are contained by the neighbor-expansion stop condition.
     return _count_table_rows(text) >= 3
+
+
+def _contains_any(text: str, patterns: list[str]) -> bool:
+    return any(p in text for p in patterns)
+
+
+def _infer_target_statement(question: str) -> str | None:
+    q = question.lower()
+    if _contains_any(q, _BALANCE_SHEET_PATTERNS):
+        return "balance_sheet"
+    if _contains_any(q, _CASH_FLOW_PATTERNS):
+        return "cash_flow"
+    if _contains_any(q, _INCOME_STATEMENT_PATTERNS):
+        return "income_statement"
+    return None
+
+
+def _statement_priority(*, question: str, row: dict[str, Any]) -> int:
+    target = _infer_target_statement(question)
+    if target is None:
+        return 0
+
+    section = str(row.get("section_name") or "").lower()
+    text = str(row.get("text") or "").lower()
+    head = f"{section}\n{text[:1200]}"
+
+    if _contains_any(section, _LOW_VALUE_SECTION_PATTERNS):
+        penalty = -3
+    elif _contains_any(head, ["note ", "notes to", "exhibit", "table of contents"]):
+        penalty = -2
+    else:
+        penalty = 0
+
+    if target == "balance_sheet":
+        if _contains_any(head, _BALANCE_SHEET_PATTERNS):
+            return 6
+        if (
+            "assets" in head
+            and "liabilities" in head
+            and (
+                "total current assets" in head
+                or "total current liabilities" in head
+                or "accounts payable" in head
+                or "property, plant and equipment" in head
+            )
+        ):
+            return 5
+        if _contains_any(head, ["current assets", "current liabilities", "accounts payable", "total assets"]):
+            return 3 + penalty
+        return penalty
+
+    if target == "cash_flow":
+        if _contains_any(head, _CASH_FLOW_PATTERNS):
+            return 6
+        if _contains_any(
+            head,
+            [
+                "cash flows from operating activities",
+                "cash flows from investing activities",
+                "cash flows from financing activities",
+                "net cash provided by operating activities",
+                "dividends paid",
+                "purchases of property, plant and equipment",
+            ],
+        ):
+            return 5
+        return penalty
+
+    if target == "income_statement":
+        if _contains_any(head, _INCOME_STATEMENT_PATTERNS):
+            return 6
+        if _contains_any(
+            head,
+            [
+                "net sales",
+                "total revenues",
+                "cost of sales",
+                "operating income",
+                "net income attributable",
+                "income before income taxes",
+            ],
+        ):
+            return 5
+        return penalty
+
+    return 0
+
+
+def _apply_statement_aware_ranking(*, question: str, docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not docs:
+        return docs
+    target = _infer_target_statement(question)
+    if target is None:
+        return docs
+
+    scored: list[tuple[tuple[float, float, float], dict[str, Any]]] = []
+    for row in docs:
+        priority = _statement_priority(question=question, row=row)
+        base = row.get("fused_score")
+        if base is None:
+            base = row.get("dense_score")
+        base_score = float(base or 0.0)
+        sparse_score = float(row.get("sparse_score") or 0.0)
+        scored.append(((float(priority), base_score, sparse_score), row))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [row for _, row in scored]
 
 
 def _expand_table_block(
@@ -854,6 +999,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable reranker even when model is provided.",
     )
     parser.add_argument(
+        "--statement-aware-rerank",
+        action="store_true",
+        help=(
+            "Apply query-aware post-ranking that boosts chunks matching the statement "
+            "type explicitly requested in the question (balance sheet / cash flow / income statement)."
+        ),
+    )
+    parser.add_argument(
         "--retrieval-only",
         action="store_true",
         help="Run retrieval diagnostics only; skip generation.",
@@ -1081,6 +1234,11 @@ def main() -> None:
                     rerank_top_k=args.rerank_top_k,
                     enabled=not args.disable_rerank,
                 )
+                if args.statement_aware_rerank:
+                    retrieved_rows = _apply_statement_aware_ranking(
+                        question=question,
+                        docs=retrieved_rows,
+                    )
 
                 chunk_ids = [row["chunk_id"] for row in retrieved_rows]
 
