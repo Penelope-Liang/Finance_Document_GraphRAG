@@ -96,6 +96,7 @@ def main() -> None:
                 "_id": financebench_id,
                 "question": question,
                 "answer": answer,
+                "gold_answer": answer,
                 "gold_type": "metrics-generated",
                 "doc_name": doc_name,
                 "question_reasoning": row.get("question_reasoning"),
