@@ -67,6 +67,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail fast on malformed rows.",
     )
+    parser.add_argument(
+        "--use-enriched-text",
+        action="store_true",
+        help="Append enrichment metadata (title/summary/keywords/table description/prefix) into embedding text.",
+    )
+    parser.add_argument(
+        "--skip-non-indexable",
+        action="store_true",
+        help="Skip rows whose metadata.should_index is explicitly false.",
+    )
     return parser
 
 
@@ -77,7 +87,42 @@ def _chunk_to_meta(row: ChunkRow) -> dict[str, Any]:
         "chunk_index": row.chunk_index,
         "section_name": row.section_name,
         "page": row.page,
+        "title_text": str(row.metadata.get("title_text") or ""),
+        "should_index": bool(row.metadata.get("should_index", True)),
     }
+
+
+def _compose_embedding_text(row: ChunkRow, *, use_enriched_text: bool) -> str:
+    if not use_enriched_text:
+        return row.text
+
+    metadata = row.metadata or {}
+    parts: list[str] = []
+
+    title_text = str(metadata.get("title_text") or "").strip()
+    prefix_text = str(metadata.get("prefix_text") or "").strip()
+    summary = str(metadata.get("summary") or "").strip()
+    table_description = str(metadata.get("table_description") or "").strip()
+
+    keywords_value = metadata.get("keywords")
+    keywords: list[str] = []
+    if isinstance(keywords_value, list):
+        keywords = [str(x).strip() for x in keywords_value if str(x).strip()]
+
+    if title_text:
+        parts.append(f"Title: {title_text}")
+    if row.section_name and row.section_name != "UNSPECIFIED":
+        parts.append(f"Section: {row.section_name}")
+    if keywords:
+        parts.append(f"Keywords: {', '.join(keywords)}")
+    if summary:
+        parts.append(f"Summary: {summary}")
+    if table_description:
+        parts.append(f"Table description: {table_description}")
+    if prefix_text:
+        parts.append(f"Prefix: {prefix_text}")
+    parts.append(f"Content: {row.text}")
+    return "\n".join(parts)
 
 
 def _embed_batch(
@@ -85,11 +130,12 @@ def _embed_batch(
     batch_rows: list[ChunkRow],
     Document: Any,
     embedder: Any,
+    use_enriched_text: bool,
 ) -> list[dict[str, Any]]:
     documents = [
         Document(
             id=row.chunk_id,
-            content=row.text,
+            content=_compose_embedding_text(row, use_enriched_text=use_enriched_text),
             meta=_chunk_to_meta(row),
         )
         for row in batch_rows
@@ -107,7 +153,7 @@ def _embed_batch(
         out_rows.append(
             {
                 "id": row.chunk_id,
-                "content": row.text,
+                "content": _compose_embedding_text(row, use_enriched_text=use_enriched_text),
                 "embedding": [float(x) for x in embedding],
                 "meta": _chunk_to_meta(row),
             }
@@ -130,6 +176,8 @@ def main() -> None:
         sys.exit(1)
 
     rows = read_chunks_ndjson(chunks_path, strict=args.strict)
+    if args.skip_non_indexable:
+        rows = [row for row in rows if bool(row.metadata.get("should_index", True))]
     if args.limit > 0:
         rows = rows[: args.limit]
     if not rows:
@@ -151,6 +199,7 @@ def main() -> None:
                 batch_rows=batch,
                 Document=Document,
                 embedder=embedder,
+                use_enriched_text=args.use_enriched_text,
             )
             for doc_row in embedded_rows:
                 if not dim:
@@ -166,6 +215,8 @@ def main() -> None:
         "chunks_path": str(chunks_path),
         "documents_path": str(docs_out),
         "embedder_model": args.embedder_model,
+        "use_enriched_text": bool(args.use_enriched_text),
+        "skip_non_indexable": bool(args.skip_non_indexable),
         "count": count,
         "dimension": dim,
         "elapsed_seconds": round(elapsed, 2),
@@ -181,4 +232,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -16,6 +16,7 @@ class ChunkRow:
     chunk_index: int
     section_name: str
     page: Optional[int]
+    metadata: dict[str, Any]
 
 
 def format_duration_minsec(seconds: float) -> str:
@@ -215,6 +216,7 @@ def read_chunks_ndjson(path: Path, *, strict: bool = True) -> list[ChunkRow]:
             chunk_index = payload.get("chunk_index", 0)
             section_name = payload.get("section_name") or "UNSPECIFIED"
             page = payload.get("page")
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
             if page is None:
                 page = payload.get("page_number")
 
@@ -251,6 +253,7 @@ def read_chunks_ndjson(path: Path, *, strict: bool = True) -> list[ChunkRow]:
                     chunk_index=chunk_index_int,
                     section_name=str(section_name).strip() or "UNSPECIFIED",
                     page=page_int,
+                    metadata=dict(metadata),
                 )
             )
     return rows
