@@ -159,27 +159,16 @@ def _upsert_batch_tx(
 ) -> tuple[int, int]:
     label_escaped = label.replace("`", "")
     id_property_escaped = id_property.replace("`", "")
+    embedding_property_escaped = embedding_property.replace("`", "")
     query = f"""
     UNWIND $rows AS row
     OPTIONAL MATCH (n:`{label_escaped}` {{{id_property_escaped}: row.chunk_id}})
-    WITH n, row
-    CALL {{
-      WITH n, row
-      WHERE n IS NOT NULL
-      CALL db.create.setNodeVectorProperty(n, $embedding_property, row.embedding)
-      RETURN 1 AS updated
-      UNION
-      WITH n, row
-      WHERE n IS NULL
-      RETURN 0 AS updated
-    }}
-    RETURN sum(updated) AS matched, size($rows) - sum(updated) AS missing
+    FOREACH (_ IN CASE WHEN n IS NULL THEN [] ELSE [1] END |
+      SET n.`{embedding_property_escaped}` = row.embedding
+    )
+    RETURN count(n) AS matched, size($rows) - count(n) AS missing
     """
-    record = tx.run(
-        query,
-        rows=rows,
-        embedding_property=embedding_property,
-    ).single()
+    record = tx.run(query, rows=rows).single()
     matched = int(record["matched"] or 0) if record is not None else 0
     missing = int(record["missing"] or 0) if record is not None else 0
     return matched, missing
