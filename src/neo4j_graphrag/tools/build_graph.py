@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from neo4j_graphrag.preprocess.statement_type import classify_statement_type
+
 @dataclass
 class ChunkRow:
     chunk_id: str
@@ -17,6 +19,11 @@ class ChunkRow:
     text: str
     chunk_index: int
     section_name: str
+    page: int | None
+    title_text: str
+    is_table: bool
+    should_index: bool
+    statement_type: str
 
 
 def _require_env(name: str) -> str:
@@ -93,6 +100,19 @@ def _read_chunks(path: Path, *, strict: bool) -> dict[str, list[ChunkRow]]:
             text = payload.get("text")
             chunk_index = payload.get("chunk_index", 0)
             section_name = payload.get("section_name") or "UNSPECIFIED"
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            page = payload.get("page")
+            if page is None:
+                page = metadata.get("page_start")
+            title_text = str(metadata.get("title_text") or "")
+            is_table = bool(metadata.get("is_table"))
+            should_index = bool(metadata.get("should_index", True))
+            statement_type = str(metadata.get("statement_type") or "").strip() or classify_statement_type(
+                section_name=str(section_name),
+                title_text=title_text,
+                text=str(text or ""),
+                metadata=metadata,
+            )
 
             if not isinstance(chunk_id, str) or not chunk_id:
                 if strict:
@@ -123,6 +143,11 @@ def _read_chunks(path: Path, *, strict: bool) -> dict[str, list[ChunkRow]]:
                     text=text,
                     chunk_index=chunk_index_int,
                     section_name=str(section_name).strip() or "UNSPECIFIED",
+                    page=int(page) if isinstance(page, (int, float)) else None,
+                    title_text=title_text.strip(),
+                    is_table=is_table,
+                    should_index=should_index,
+                    statement_type=statement_type,
                 )
             )
 
@@ -143,6 +168,8 @@ def _create_constraints_and_indexes(
         "CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:Chunk) REQUIRE c.chunk_id IS UNIQUE",
         "CREATE CONSTRAINT form_id_unique IF NOT EXISTS FOR (f:Form) REQUIRE f.form_id IS UNIQUE",
         "CREATE CONSTRAINT company_id_unique IF NOT EXISTS FOR (c:Company) REQUIRE c.company_id IS UNIQUE",
+        "CREATE CONSTRAINT statement_type_name_unique IF NOT EXISTS FOR (st:StatementType) REQUIRE st.name IS UNIQUE",
+        "CREATE INDEX chunk_statement_type IF NOT EXISTS FOR (c:Chunk) ON (c.statement_type)",
     ]
     if with_sections:
         statements.append(
@@ -227,9 +254,18 @@ def _import_doc_tx(
             SET c.text = row.text,
                 c.chunk_index = row.chunk_index,
                 c.section_name = row.section_name,
+                c.page = row.page,
+                c.title_text = row.title_text,
+                c.is_table = row.is_table,
+                c.should_index = row.should_index,
+                c.statement_type = row.statement_type,
                 c.doc_id = $doc_id
+            SET s.statement_type = coalesce(s.statement_type, row.statement_type)
             MERGE (c)-[:IN_SECTION]->(s)
             MERGE (c)-[:IN_FORM]->(f)
+            MERGE (st:StatementType {name: row.statement_type})
+            MERGE (c)-[:HAS_STATEMENT_TYPE]->(st)
+            MERGE (s)-[:HAS_STATEMENT_TYPE]->(st)
             """,
             rows=rows_payload,
             form_id=form_id,
@@ -244,8 +280,15 @@ def _import_doc_tx(
             SET c.text = row.text,
                 c.chunk_index = row.chunk_index,
                 c.section_name = row.section_name,
+                c.page = row.page,
+                c.title_text = row.title_text,
+                c.is_table = row.is_table,
+                c.should_index = row.should_index,
+                c.statement_type = row.statement_type,
                 c.doc_id = $doc_id
             MERGE (c)-[:IN_FORM]->(f)
+            MERGE (st:StatementType {name: row.statement_type})
+            MERGE (c)-[:HAS_STATEMENT_TYPE]->(st)
             """,
             rows=rows_payload,
             form_id=form_id,
@@ -421,6 +464,11 @@ def main() -> None:
                     "text": r.text,
                     "chunk_index": r.chunk_index,
                     "section_name": r.section_name,
+                    "page": r.page,
+                    "title_text": r.title_text,
+                    "is_table": r.is_table,
+                    "should_index": r.should_index,
+                    "statement_type": r.statement_type,
                 }
                 for r in rows
             ]
