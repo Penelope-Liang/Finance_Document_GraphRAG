@@ -107,6 +107,78 @@ _LOW_VALUE_SECTION_PATTERNS = [
     "north america",
 ]
 
+_METRIC_ALIAS_PATTERNS: dict[str, list[str]] = {
+    "net_ppne": [
+        "property, plant and equipment, net",
+        "property plant and equipment, net",
+        "property, plant and equipment — net",
+        "property, plant and equipment - net",
+        "net property, plant and equipment",
+        "pp&e, net",
+        "pp&e net",
+    ],
+    "net_ar": [
+        "accounts receivable, net",
+        "account receivable, net",
+        "trade receivables, net",
+        "receivables, net",
+        "net receivables",
+    ],
+    "cash_dividends_paid": [
+        "dividends paid",
+        "cash dividends",
+        "cash dividends paid",
+        "payment of dividends",
+    ],
+    "operating_cash_flow": [
+        "cash flow from operating activities",
+        "cash flows from operating activities",
+        "net cash provided by operating activities",
+        "net cash provided by operating activity",
+        "net cash from operating activities",
+    ],
+    "accounts_payable": [
+        "accounts payable",
+    ],
+    "total_current_liabilities": [
+        "total current liabilities",
+    ],
+    "total_current_assets": [
+        "total current assets",
+    ],
+    "inventories": [
+        "inventories",
+        "total inventories",
+        "inventory",
+    ],
+    "total_assets": [
+        "total assets",
+    ],
+    "cogs": [
+        "cost of sales",
+        "cost of products sold",
+        "cost of revenue",
+        "cost of goods sold",
+        "cost of goods",
+    ],
+    "net_income_attributable": [
+        "net income attributable",
+        "net income attributable to shareholders",
+        "net income attributable to common shareholders",
+        "net income attributable to 3m",
+    ],
+    "capex": [
+        "capital expenditures",
+        "capital expenditure",
+        "purchases of property, plant and equipment",
+        "purchase of property and equipment",
+        "purchases of property and equipment",
+        "additions to property, plant and equipment",
+        "acquisition of property, plant and equipment",
+        "purchase of pp&e",
+    ],
+}
+
 
 def _count_table_rows(text: str) -> int:
     rows = 0
@@ -144,6 +216,86 @@ def _infer_target_statement(question: str) -> str | None:
     if _contains_any(q, _INCOME_STATEMENT_PATTERNS):
         return "income_statement"
     return None
+
+
+def _extract_target_years(question: str) -> list[str]:
+    years = re.findall(r"\b(?:fy)?(20\d{2}|19\d{2})\b", question.lower())
+    out: list[str] = []
+    for year in years:
+        if year not in out:
+            out.append(year)
+    return out
+
+
+def _infer_target_metric(question: str) -> str | None:
+    q = question.lower()
+    if "net ppne" in q or "net property, plant, and equipment" in q or "net property, plant and equipment" in q:
+        return "net_ppne"
+    if "net ar" in q:
+        return "net_ar"
+    if "cash dividends" in q or "dividends" in q:
+        return "cash_dividends_paid"
+    if "cash flow from operating activities" in q or "cash flows from operating activities" in q:
+        return "operating_cash_flow"
+    if "accounts payable" in q:
+        return "accounts_payable"
+    if "total current liabilities" in q:
+        return "total_current_liabilities"
+    if "total current assets" in q:
+        return "total_current_assets"
+    if "inventories" in q or "inventory" in q:
+        return "inventories"
+    if "total assets" in q:
+        return "total_assets"
+    if "cogs" in q or "cost of goods sold" in q:
+        return "cogs"
+    if "net income attributable" in q:
+        return "net_income_attributable"
+    if "capital expenditure" in q or "capital expenditures" in q or "capex" in q:
+        return "capex"
+    return None
+
+
+def _metric_priority(*, question: str, row: dict[str, Any]) -> int:
+    metric = _infer_target_metric(question)
+    if metric is None:
+        return 0
+
+    text = str(row.get("text") or "").lower()
+    section = str(row.get("section_name") or "").lower()
+    head = f"{section}\n{text[:2000]}"
+    patterns = _METRIC_ALIAS_PATTERNS.get(metric, [])
+
+    pattern_hits = sum(1 for p in patterns if p in head)
+    if pattern_hits <= 0:
+        return 0
+
+    score = min(6, pattern_hits * 2)
+    if metric in {
+        "accounts_payable",
+        "total_current_liabilities",
+        "total_current_assets",
+        "net_ppne",
+        "net_ar",
+        "cash_dividends_paid",
+        "operating_cash_flow",
+        "capex",
+    }:
+        score += 2
+    return score
+
+
+def _year_priority(*, question: str, row: dict[str, Any]) -> int:
+    years = _extract_target_years(question)
+    if not years:
+        return 0
+    text = str(row.get("text") or "").lower()
+    section = str(row.get("section_name") or "").lower()
+    head = f"{section}\n{text[:2000]}"
+    hits = sum(1 for year in years if year in head)
+    if hits <= 0:
+        return 0
+    return min(3, hits)
 
 
 def _statement_priority(*, question: str, row: dict[str, Any]) -> int:
@@ -224,15 +376,28 @@ def _apply_statement_aware_ranking(*, question: str, docs: list[dict[str, Any]])
     if target is None:
         return docs
 
-    scored: list[tuple[tuple[float, float, float], dict[str, Any]]] = []
+    scored: list[tuple[tuple[float, float, float, float, float], dict[str, Any]]] = []
     for row in docs:
-        priority = _statement_priority(question=question, row=row)
+        statement_priority = _statement_priority(question=question, row=row)
+        metric_priority = _metric_priority(question=question, row=row)
+        year_priority = _year_priority(question=question, row=row)
         base = row.get("fused_score")
         if base is None:
             base = row.get("dense_score")
         base_score = float(base or 0.0)
         sparse_score = float(row.get("sparse_score") or 0.0)
-        scored.append(((float(priority), base_score, sparse_score), row))
+        scored.append(
+            (
+                (
+                    float(statement_priority),
+                    float(metric_priority),
+                    float(year_priority),
+                    base_score,
+                    sparse_score,
+                ),
+                row,
+            )
+        )
 
     scored.sort(key=lambda item: item[0], reverse=True)
     return [row for _, row in scored]
