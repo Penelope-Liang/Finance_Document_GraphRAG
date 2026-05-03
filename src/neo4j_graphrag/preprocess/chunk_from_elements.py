@@ -41,6 +41,8 @@ class ChunkBuffer:
     pages: list[int] = field(default_factory=list)
     bboxes: list[list[list[float]]] = field(default_factory=list)
     table_html: Optional[str] = None
+    parser_engines: list[str] = field(default_factory=list)
+    intermediate_schemas: list[str] = field(default_factory=list)
 
     def add(self, row: ElementRow) -> None:
         self.texts.append(row.text.strip())
@@ -53,6 +55,12 @@ class ChunkBuffer:
         html = row.metadata.get("text_as_html")
         if isinstance(html, str) and html.strip() and row.category == "Table":
             self.table_html = html
+        parser_backend = str(row.metadata.get("parser_backend") or "").strip().lower()
+        if parser_backend:
+            self.parser_engines.append(parser_backend)
+        intermediate_schema = str(row.metadata.get("intermediate_schema") or "").strip()
+        if intermediate_schema:
+            self.intermediate_schemas.append(intermediate_schema)
 
     @property
     def char_count(self) -> int:
@@ -99,7 +107,27 @@ class ChunkBuffer:
             "is_front_matter": is_front_matter,
             "is_appendix_like": is_appendix_like,
             "should_index": not (is_toc_like or is_front_matter or is_appendix_like),
+            "parser_engine": _choose_label(self.parser_engines, default="unstructured"),
+            "intermediate_schema": _choose_label(
+                self.intermediate_schemas,
+                default="unstructured_compatible",
+            ),
+            "chunker": "legacy_chunk_from_elements",
         }
+
+
+def _choose_label(values: list[str], *, default: str) -> str:
+    if not values:
+        return default
+    counts: dict[str, int] = {}
+    for value in values:
+        clean = value.strip()
+        if not clean:
+            continue
+        counts[clean] = counts.get(clean, 0) + 1
+    if not counts:
+        return default
+    return max(counts.items(), key=lambda item: item[1])[0]
 
 
 def _read_elements(path: Path) -> list[ElementRow]:
@@ -309,6 +337,7 @@ def _make_record(
         chunk_index=chunk_index,
         text=text,
     )
+    metadata = buffer.build_metadata()
     return {
         "chunk_id": chunk_id,
         "chunk_id_version": chunk_id_version,
@@ -318,9 +347,9 @@ def _make_record(
         "section_name": section_name,
         "page": min(buffer.pages) if buffer.pages else None,
         "source_type": source_type,
-        "parser_engine": "unstructured_elements",
+        "parser_engine": metadata.get("parser_engine", "unstructured"),
         "chunk_engine": chunk_engine,
-        "metadata": buffer.build_metadata(),
+        "metadata": metadata,
     }
 
 
