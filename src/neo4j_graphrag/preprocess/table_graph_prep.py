@@ -237,6 +237,13 @@ def _infer_numeric_kind(text: str, row_header: str = "", col_header: str = "", s
     return "PLAIN"
 
 
+def _normalize_percent_value(text: str, value: float) -> float:
+    clean = _normalize_space(text)
+    if "%" in clean:
+        return value
+    return value / 100.0
+
+
 class _TableHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -431,6 +438,8 @@ def _classify_grid(
                 normalized_value = cell["numeric_value"] * scale_factor
                 applied_scale = scale_label
             elif numeric_kind == "PERCENT":
+                cell["numeric_value"] = _normalize_percent_value(cell["text"], cell["numeric_value"])
+                normalized_value = cell["numeric_value"]
                 applied_scale = "percent"
             cell["row_header"] = row_header
             cell["col_header"] = col_header
