@@ -68,6 +68,20 @@ _PERCENT_CONTEXT_HINTS = (
     "translation",
     "divestitures",
 )
+_ROW_PERCENT_HINTS = (
+    "price",
+    "volume",
+    "volume-organic",
+    "volume -organic",
+    "volume - organic",
+    "organic local-currency sales",
+    "organic local currency sales",
+    "organic sales change",
+    "organic sales growth",
+    "sales change",
+    "local-currency sales change",
+    "local currency sales change",
+)
 _EMPTY_VALUES = {
     "",
     "-",
@@ -141,7 +155,23 @@ def _looks_numeric_cell(text: str) -> bool:
         return False
     if _contains_alpha(clean) or _is_period_header_text(clean):
         return False
-    return bool(_NUMERIC_CELL_RE.fullmatch(clean))
+    if _NUMERIC_CELL_RE.fullmatch(clean):
+        return True
+    compact = (
+        clean.replace("$", "")
+        .replace("€", "")
+        .replace("£", "")
+        .replace("¥", "")
+        .replace(",", "")
+        .replace(" ", "")
+    )
+    if compact.startswith("(") and compact.endswith(")%"):
+        compact = compact[1:-2] + "%"
+    elif compact.startswith("(") and compact.endswith(")"):
+        compact = compact[1:-1]
+    elif compact.startswith("-(") and compact.endswith(")"):
+        compact = compact[2:-1]
+    return bool(_NUMBER_RE.fullmatch(compact.strip("%")))
 
 
 def _extract_number(text: str) -> Optional[float]:
@@ -159,6 +189,9 @@ def _extract_number(text: str) -> Optional[float]:
     elif stripped.startswith("(") and stripped.endswith(")"):
         negative = True
         stripped = stripped[1:-1]
+    elif stripped.startswith("-(") and stripped.endswith(")"):
+        negative = True
+        stripped = stripped[2:-1]
     match = _NUMBER_RE.fullmatch(stripped.strip("%"))
     if not match:
         return None
@@ -183,13 +216,17 @@ def _infer_scale(texts: list[str]) -> tuple[str, float]:
 
 def _infer_numeric_kind(text: str, row_header: str = "", col_header: str = "", section_name: str = "") -> str:
     clean = _normalize_space(text)
+    normalized_row_header = _normalize_space(row_header).casefold()
     context = " ".join(
         _normalize_space(part).casefold()
         for part in (row_header, col_header, section_name)
         if part
     )
     compact_context = context.replace(" ", "")
+    compact_row_header = normalized_row_header.replace(" ", "")
     if "%" in clean or any(hint in context or hint.replace(" ", "") in compact_context for hint in _PERCENT_CONTEXT_HINTS):
+        return "PERCENT"
+    if any(hint in normalized_row_header or hint.replace(" ", "") in compact_row_header for hint in _ROW_PERCENT_HINTS):
         return "PERCENT"
     if any(token in clean for token in ("$", "€", "£", "¥")):
         return "AMOUNT"
