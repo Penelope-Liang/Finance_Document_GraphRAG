@@ -12,10 +12,61 @@ from typing import Any, Optional
 
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 _NUMBER_RE = re.compile(r"[+-]?(?:\d[\d,]*\.?\d*|\.\d+)")
+_NUMERIC_CELL_RE = re.compile(
+    r"""
+    ^\s*
+    \(?
+    [\$€£¥]?
+    \s*
+    [+-]?
+    (?:
+        \d[\d,]*\.?\d*
+        |
+        \.\d+
+    )
+    \)?
+    \s*
+    %?
+    \s*[\$€£¥]?
+    \s*$
+    """,
+    re.VERBOSE,
+)
 _SCALE_HINTS = (
     ("billion", 1_000_000_000.0),
     ("million", 1_000_000.0),
     ("thousand", 1_000.0),
+)
+_PERIOD_HEADER_HINTS = (
+    "three months ended",
+    "year ended",
+    "months ended",
+    "quarter ended",
+    "quarters ended",
+    "as of",
+    "at december",
+    "at january",
+    "at march",
+    "at june",
+    "at september",
+    "at october",
+    "at november",
+)
+_PERCENT_CONTEXT_HINTS = (
+    "%",
+    "percent",
+    "margin",
+    "% of total",
+    "%of total",
+    "% change",
+    "%change",
+    "change",
+    "sales change",
+    "total sales change",
+    "mix",
+    "growth",
+    "translation",
+    "divestitures",
 )
 _EMPTY_VALUES = {
     "",
@@ -56,17 +107,59 @@ def _is_year(text: str) -> bool:
     return bool(clean and _YEAR_RE.fullmatch(clean))
 
 
+def _contains_alpha(text: str) -> bool:
+    return any(char.isalpha() for char in _normalize_space(text))
+
+
+def _is_period_header_text(text: str) -> bool:
+    clean = _normalize_space(text).casefold()
+    if not clean:
+        return False
+    if any(hint in clean for hint in _PERIOD_HEADER_HINTS):
+        return True
+    if _YEAR_RE.search(clean) and any(month in clean for month in (
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    )):
+        return True
+    return False
+
+
+def _looks_numeric_cell(text: str) -> bool:
+    clean = _normalize_space(text)
+    if not clean or _is_year(clean):
+        return False
+    if _contains_alpha(clean) or _is_period_header_text(clean):
+        return False
+    return bool(_NUMERIC_CELL_RE.fullmatch(clean))
+
+
 def _extract_number(text: str) -> Optional[float]:
     clean = _normalize_space(text)
     if not clean:
         return None
-    if _is_year(clean):
+    if _is_year(clean) or not _looks_numeric_cell(clean):
         return None
     stripped = clean.replace("$", "").replace("€", "").replace("£", "")
     stripped = stripped.replace("¥", "").replace(",", "").replace(" ", "")
-    negative = stripped.startswith("(") and stripped.endswith(")")
-    stripped = stripped.strip("()")
-    match = _NUMBER_RE.search(stripped)
+    negative = False
+    if stripped.startswith("(") and stripped.endswith(")%"):
+        negative = True
+        stripped = stripped[1:-2] + "%"
+    elif stripped.startswith("(") and stripped.endswith(")"):
+        negative = True
+        stripped = stripped[1:-1]
+    match = _NUMBER_RE.fullmatch(stripped.strip("%"))
     if not match:
         return None
     try:
@@ -85,9 +178,26 @@ def _infer_scale(texts: list[str]) -> tuple[str, float]:
     for label, factor in _SCALE_HINTS:
         if f"in {label}" in haystack or label in haystack:
             return label, factor
-    if "%" in haystack or "percent" in haystack:
-        return "percent", 0.01
     return "", 1.0
+
+
+def _infer_numeric_kind(text: str, row_header: str = "", col_header: str = "", section_name: str = "") -> str:
+    clean = _normalize_space(text)
+    context = " ".join(
+        _normalize_space(part).casefold()
+        for part in (row_header, col_header, section_name)
+        if part
+    )
+    compact_context = context.replace(" ", "")
+    if "%" in clean or any(hint in context or hint.replace(" ", "") in compact_context for hint in _PERCENT_CONTEXT_HINTS):
+        return "PERCENT"
+    if any(token in clean for token in ("$", "€", "£", "¥")):
+        return "AMOUNT"
+    if any(token in context for token in ("sales", "income", "taxes", "assets", "debt", "cash", "revenue", "expense")):
+        return "AMOUNT"
+    if any(token in context for token in ("per share", "eps", "diluted share", "basic share")):
+        return "PLAIN"
+    return "PLAIN"
 
 
 class _TableHTMLParser(HTMLParser):
@@ -242,12 +352,15 @@ def _classify_grid(
                 cell_type = "EMPTY"
             elif _is_year(text):
                 cell_type = "YEAR"
+            elif cell["is_header"] and (cell["col_idx"] > 0 or _is_period_header_text(text)):
+                cell_type = "COL_HEADER"
+            elif _is_period_header_text(text):
+                cell_type = "COL_HEADER"
             else:
                 number = _extract_number(text)
                 if number is not None:
                     cell_type = "NUMBER"
                     numeric_value = number
-                    normalized_value = number * scale_factor if scale_factor not in {0.01, 1.0} else number
                 elif cell["is_header"] or (cell["col_idx"] == 0 and row_has_number.get(cell["row_idx"], False)):
                     cell_type = "ROW_HEADER"
                 elif cell["row_idx"] == 0 and col_has_number.get(cell["col_idx"], False):
@@ -259,7 +372,33 @@ def _classify_grid(
 
             cell["cell_type"] = cell_type
             cell["numeric_value"] = numeric_value
-            cell["scale"] = scale_label if numeric_value is not None else ""
+            cell["normalized_value"] = normalized_value
+            cell["scale"] = ""
+            cell["numeric_kind"] = ""
+
+    for row in grid:
+        for cell in row:
+            if cell["cell_type"] != "NUMBER":
+                continue
+            row_header = _find_left_header(grid, cell["row_idx"], cell["col_idx"])
+            col_header = _find_top_header(grid, cell["row_idx"], cell["col_idx"])
+            numeric_kind = _infer_numeric_kind(
+                cell["text"],
+                row_header=row_header,
+                col_header=col_header,
+                section_name=section_name,
+            )
+            normalized_value = cell["numeric_value"]
+            applied_scale = ""
+            if numeric_kind == "AMOUNT" and scale_factor != 1.0:
+                normalized_value = cell["numeric_value"] * scale_factor
+                applied_scale = scale_label
+            elif numeric_kind == "PERCENT":
+                applied_scale = "percent"
+            cell["row_header"] = row_header
+            cell["col_header"] = col_header
+            cell["numeric_kind"] = numeric_kind
+            cell["scale"] = applied_scale
             cell["normalized_value"] = normalized_value
 
     return grid
@@ -275,11 +414,14 @@ def _find_left_header(grid: list[list[dict[str, Any]]], row_idx: int, col_idx: i
 
 
 def _find_top_header(grid: list[list[dict[str, Any]]], row_idx: int, col_idx: int) -> str:
+    parts: list[str] = []
     for idx in range(row_idx - 1, -1, -1):
         cell = grid[idx][col_idx]
-        if cell["cell_type"] in {"COL_HEADER", "YEAR", "TEXT"} and not _is_empty_text(cell["text"]):
-            return cell["text"]
-    return ""
+        if cell["cell_type"] in {"COL_HEADER", "YEAR"} and not _is_empty_text(cell["text"]):
+            text = cell["text"]
+            if text not in parts:
+                parts.append(text)
+    return " | ".join(reversed(parts))
 
 
 def _build_table_structured(
@@ -313,11 +455,13 @@ def _build_table_structured(
             }
             if cell["numeric_value"] is not None:
                 record["numeric_value"] = cell["numeric_value"]
+                record["numeric_kind"] = cell["numeric_kind"]
                 record["scale"] = cell["scale"]
                 record["normalized_value"] = cell["normalized_value"]
-                record["row_header"] = _find_left_header(grid, cell["row_idx"], cell["col_idx"])
-                record["col_header"] = _find_top_header(grid, cell["row_idx"], cell["col_idx"])
-                numeric_cells.append(record)
+                record["row_header"] = cell.get("row_header", "")
+                record["col_header"] = cell.get("col_header", "")
+                if not cell["is_span_ref"]:
+                    numeric_cells.append(record)
             cells.append(record)
 
     rows = [
