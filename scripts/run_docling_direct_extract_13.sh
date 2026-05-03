@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PDF_DIR="${ROOT_DIR}/dataset/financebench/pdfs"
 OUT_DIR="${ROOT_DIR}/output/docling_direct_extract_13"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 mkdir -p "${OUT_DIR}"
 
@@ -34,21 +35,21 @@ for pdf in "${PDFS[@]}"; do
   echo
   echo "=== ${pdf} ==="
 
-  PYTHONPATH="${ROOT_DIR}/src" python3 -u -m neo4j_graphrag.preprocess.docling_adapter \
+  PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.docling_adapter \
     --input-path "${input_path}" \
     --clean-output "${clean_out}" \
     --elements-output "${elements_out}"
 
-  PYTHONPATH="${ROOT_DIR}/src" python3 -u -m neo4j_graphrag.preprocess.chunk_from_elements \
+  PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.chunk_from_elements \
     --elements-path "${elements_out}" \
     --output "${chunks_out}"
 
-  PYTHONPATH="${ROOT_DIR}/src" python3 -u -m neo4j_graphrag.preprocess.table_graph_prep \
+  PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.table_graph_prep \
     --chunks-path "${chunks_out}" \
     --output "${tables_out}"
 done
 
-PYTHONPATH="${ROOT_DIR}/src" python3 -u -m neo4j_graphrag.preprocess.write_artifact_manifest \
+PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.write_artifact_manifest \
   --artifact 3m_chunks="${OUT_DIR}/3M_2018_10K_chunks.ndjson" \
   --artifact 3m_tables="${OUT_DIR}/3M_2018_10K_chunks_table_structured.ndjson" \
   --artifact amazon_chunks="${OUT_DIR}/AMAZON_2019_10K_chunks.ndjson" \
