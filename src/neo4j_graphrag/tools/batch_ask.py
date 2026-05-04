@@ -167,16 +167,26 @@ def main() -> None:
 
     # Setup
     uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
+    user = os.environ.get("NEO4J_USER", "neo4j")
     password = _require_env("NEO4J_PASSWORD")
+    database = os.environ.get("NEO4J_DATABASE")
     vector_index = os.environ.get("NEO4J_VECTOR_INDEX", "chunk_embedding_index")
     fulltext_index = "chunk_fulltext_index"
+    llm_model = os.environ.get("OLLAMA_LLM_MODEL", "qwen2.5:72b")
+    embedding_model = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3:latest")
+    ollama_host = os.environ.get("OLLAMA_HOST")
+
+    ollama_kwargs = {}
+    if ollama_host:
+        ollama_kwargs["host"] = ollama_host
 
     llm = OllamaLLM(
-        model_name="qwen2.5:72b",
+        model_name=llm_model,
         model_params={"options": {"temperature": 0}},
+        **ollama_kwargs,
     )
 
-    embedder = OllamaEmbeddings(model="bge-m3:latest")
+    embedder = OllamaEmbeddings(model=embedding_model, **ollama_kwargs)
 
     RETRIEVAL_QUERY = """
     WITH node AS chunk, score
@@ -195,11 +205,12 @@ def main() -> None:
 
     results = []
 
-    with neo4j.GraphDatabase.driver(uri, auth=("neo4j", password)) as driver:
+    with neo4j.GraphDatabase.driver(uri, auth=(user, password)) as driver:
         if args.retriever_mode == "text2cypher":
             retriever = Text2CypherRetriever(
                 driver=driver,
                 llm=llm,
+                neo4j_database=database,
                 neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
                 examples=TEXT2CYPHER_EXAMPLES,
                 custom_prompt=TEXT2CYPHER_PROMPT,
@@ -209,6 +220,7 @@ def main() -> None:
                 driver=driver,
                 vector_index_name=vector_index,
                 fulltext_index_name=fulltext_index,
+                neo4j_database=database,
                 retrieval_query=RETRIEVAL_QUERY,
                 embedder=embedder,
             )
