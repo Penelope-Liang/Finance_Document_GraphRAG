@@ -25,7 +25,7 @@ EOF
 NEO4J_URI=""
 NEO4J_USER=""
 NEO4J_PASSWORD=""
-NEO4J_DATABASE="neo4j"
+NEO4J_DATABASE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -97,26 +97,38 @@ for chunks_path in "${CHUNK_FILES[@]}"; do
   echo
   echo "=== Importing ${base_name} ==="
 
+  build_cmd=(
+    "${PYTHON_BIN}" "${ROOT_DIR}/src/neo4j_graphrag/tools/build_graph.py"
+    --chunks-path "${chunks_path}"
+    --state-path "${state_path}"
+    --purge-doc-first
+  )
+  if [[ -n "${NEO4J_DATABASE}" ]]; then
+    build_cmd+=(--neo4j-database "${NEO4J_DATABASE}")
+  fi
+
   NEO4J_URI="${NEO4J_URI}" \
   NEO4J_USER="${NEO4J_USER}" \
   NEO4J_PASSWORD="${NEO4J_PASSWORD}" \
-  NEO4J_DATABASE="${NEO4J_DATABASE}" \
   PYTHONPATH="${ROOT_DIR}/src" \
-  "${PYTHON_BIN}" "${ROOT_DIR}/src/neo4j_graphrag/tools/build_graph.py" \
-    --chunks-path "${chunks_path}" \
-    --state-path "${state_path}" \
-    --purge-doc-first
+  "${build_cmd[@]}"
 
   if [[ -f "${tables_path}" ]]; then
+    table_cmd=(
+      "${PYTHON_BIN}" "${ROOT_DIR}/src/neo4j_graphrag/tools/import_tables.py"
+      --chunks-path "${tables_path}"
+      --cell-mode numeric
+      --purge-doc-first
+    )
+    if [[ -n "${NEO4J_DATABASE}" ]]; then
+      table_cmd+=(--neo4j-database "${NEO4J_DATABASE}")
+    fi
+
     NEO4J_URI="${NEO4J_URI}" \
     NEO4J_USER="${NEO4J_USER}" \
     NEO4J_PASSWORD="${NEO4J_PASSWORD}" \
-    NEO4J_DATABASE="${NEO4J_DATABASE}" \
     PYTHONPATH="${ROOT_DIR}/src" \
-    "${PYTHON_BIN}" "${ROOT_DIR}/src/neo4j_graphrag/tools/import_tables.py" \
-      --chunks-path "${tables_path}" \
-      --cell-mode numeric \
-      --purge-doc-first
+    "${table_cmd[@]}"
   fi
 done
 
