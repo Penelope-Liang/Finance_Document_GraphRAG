@@ -231,11 +231,14 @@ def main() -> None:
             start = time.time()
             
             try:
-                result = rag.search(
-                    query_text=question,
-                    retriever_config={"top_k": args.top_k},
-                    return_context=args.return_context,
-                )
+                search_kwargs = {
+                    "query_text": question,
+                    "return_context": args.return_context,
+                }
+                if args.retriever_mode != "text2cypher":
+                    search_kwargs["retriever_config"] = {"top_k": args.top_k}
+
+                result = rag.search(**search_kwargs)
                 answer = result.answer
                 elapsed = time.time() - start
                 print(f"  Answer: {answer[:100]}..." if len(answer) > 100 else f"  Answer: {answer}")
