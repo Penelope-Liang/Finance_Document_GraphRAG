@@ -97,13 +97,25 @@ def main() -> None:
 
     retrieval_query = """
     WITH node AS chunk, score
+    OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
     OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
-    WITH chunk, score, collect(DISTINCT {
-        label: coalesce(entity.type, head(labels(entity))),
-        name: coalesce(entity.title, entity.name, elementId(entity))
-    }) AS entities
+    WITH chunk, score,
+         collect(DISTINCT {
+             row_header: cell.row_header,
+             col_header: cell.col_header,
+             text: cell.text,
+             numeric_value: cell.numeric_value,
+             numeric_kind: cell.numeric_kind,
+             scale: cell.scale
+         })[0..20] AS table_cells,
+         collect(DISTINCT {
+             label: coalesce(entity.type, head(labels(entity))),
+             name: coalesce(entity.title, entity.name, elementId(entity))
+         }) AS entities
     RETURN chunk.text AS text,
+           chunk.section_name AS section_name,
            score AS similarity_score,
+           table_cells,
            entities
     """
 
