@@ -71,6 +71,17 @@ def main() -> None:
         default=5,
         help="Top K candidates for hybrid retrieval.",
     )
+    parser.add_argument(
+        "--effective-search-ratio",
+        type=int,
+        default=10,
+        help="Hybrid candidate expansion factor before final top-k.",
+    )
+    parser.add_argument(
+        "--restrict-doc-id",
+        action="store_true",
+        help="Diagnostic mode: restrict hybrid evidence to the target doc_id.",
+    )
     args = parser.parse_args()
 
     uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
@@ -97,6 +108,7 @@ def main() -> None:
 
     retrieval_query = """
     WITH node AS chunk, score
+    WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
     OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
     OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
     WITH chunk, score,
@@ -151,7 +163,13 @@ def main() -> None:
                     "return_context": True,
                 }
                 if args.retriever_mode == "hybrid":
-                    search_kwargs["retriever_config"] = {"top_k": args.top_k}
+                    retriever_config = {
+                        "top_k": args.top_k,
+                        "effective_search_ratio": args.effective_search_ratio,
+                    }
+                    if args.restrict_doc_id:
+                        retriever_config["query_params"] = {"doc_id": row["doc_id"]}
+                    search_kwargs["retriever_config"] = retriever_config
 
                 result = rag.search(**search_kwargs)
                 raw_answer = result.answer
