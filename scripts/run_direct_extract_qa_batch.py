@@ -5,12 +5,15 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.retrievers import HybridCypherRetriever, Text2CypherRetriever
+from neo4j_graphrag.retrievers.base import Retriever
+from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResultItem
 
 from neo4j_graphrag.tools.batch_ask import (
     FINANCIAL_GRAPH_SCHEMA,
@@ -47,6 +50,118 @@ def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
     return raw_answer, None
 
 
+def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
+    text = str(record.get("text") or "").strip()
+    section_name = str(record.get("section_name") or "").strip()
+    table_cells = record.get("table_cells") or []
+    lines = []
+    if section_name:
+        lines.append(f"Section: {section_name}")
+    if text:
+        lines.append(f"Chunk: {text}")
+    if table_cells:
+        lines.append("Related table cells:")
+        for cell in table_cells[:10]:
+            if not isinstance(cell, dict):
+                continue
+            row_header = cell.get("row_header")
+            col_header = cell.get("col_header")
+            cell_text = cell.get("text")
+            numeric_value = cell.get("numeric_value")
+            numeric_kind = cell.get("numeric_kind")
+            scale = cell.get("scale")
+            lines.append(
+                f"- row={row_header!r}; col={col_header!r}; text={cell_text!r}; "
+                f"numeric_value={numeric_value!r}; numeric_kind={numeric_kind!r}; scale={scale!r}"
+            )
+    if not lines:
+        lines.append(str(record))
+    return RetrieverResultItem(
+        content="\n".join(lines),
+        metadata={
+            "section_name": section_name or None,
+            "similarity_score": record.get("similarity_score"),
+            "source": "chunk",
+        },
+    )
+
+
+def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
+    section_name = str(record.get("section_name") or "").strip()
+    row_header = record.get("row_header")
+    col_header = record.get("col_header")
+    text = record.get("text")
+    numeric_value = record.get("numeric_value")
+    numeric_kind = record.get("numeric_kind")
+    scale = record.get("scale")
+    content = (
+        f"Section: {section_name}\n"
+        f"Table evidence: row={row_header!r}; col={col_header!r}; text={text!r}; "
+        f"numeric_value={numeric_value!r}; numeric_kind={numeric_kind!r}; scale={scale!r}"
+    )
+    return RetrieverResultItem(
+        content=content,
+        metadata={
+            "section_name": section_name or None,
+            "row_header": row_header,
+            "col_header": col_header,
+            "source": "table",
+        },
+    )
+
+
+class DualRetriever(Retriever):
+    VERIFY_NEO4J_VERSION = False
+
+    def __init__(
+        self,
+        driver: neo4j.Driver,
+        chunk_retriever: HybridCypherRetriever,
+        table_retriever: Text2CypherRetriever,
+        neo4j_database: str | None = None,
+    ) -> None:
+        super().__init__(driver, neo4j_database)
+        self.chunk_retriever = chunk_retriever
+        self.table_retriever = table_retriever
+
+    def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
+        raise NotImplementedError("DualRetriever uses a custom search implementation.")
+
+    def search(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        effective_search_ratio: int = 10,
+        query_params: dict[str, Any] | None = None,
+    ) -> RetrieverResult:
+        chunk_result = self.chunk_retriever.search(
+            query_text=query_text,
+            top_k=top_k,
+            effective_search_ratio=effective_search_ratio,
+            query_params=query_params,
+        )
+        table_result = self.table_retriever.search(query_text=query_text)
+
+        items: list[RetrieverResultItem] = []
+        seen_contents: set[str] = set()
+
+        for item in table_result.items + chunk_result.items:
+            content = str(item.content)
+            if content in seen_contents:
+                continue
+            seen_contents.add(content)
+            items.append(item)
+
+        return RetrieverResult(
+            items=items,
+            metadata={
+                "__retriever": "DualRetriever",
+                "chunk_retriever": chunk_result.metadata,
+                "table_retriever": table_result.metadata,
+            },
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the 13 direct-extraction FinanceBench questions via GraphRAG.")
     parser.add_argument(
@@ -61,7 +176,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--retriever-mode",
-        choices=["text2cypher", "hybrid"],
+        choices=["text2cypher", "hybrid", "dual"],
         default="text2cypher",
         help="Retriever mode to use for the batch run.",
     )
@@ -106,7 +221,7 @@ def main() -> None:
     )
     embedder = OllamaEmbeddings(model=embedding_model, **ollama_kwargs)
 
-    retrieval_query = """
+    chunk_retrieval_query = """
     WITH node AS chunk, score
     WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
     OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
@@ -141,15 +256,42 @@ def main() -> None:
                 neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
                 examples=TEXT2CYPHER_EXAMPLES,
                 custom_prompt=TEXT2CYPHER_PROMPT,
+                result_formatter=_format_table_record,
             )
-        else:
+        elif args.retriever_mode == "hybrid":
             retriever = HybridCypherRetriever(
                 driver=driver,
                 vector_index_name=vector_index,
                 fulltext_index_name=fulltext_index,
                 neo4j_database=database,
-                retrieval_query=retrieval_query,
+                retrieval_query=chunk_retrieval_query,
                 embedder=embedder,
+                result_formatter=_format_chunk_record,
+            )
+        else:
+            chunk_retriever = HybridCypherRetriever(
+                driver=driver,
+                vector_index_name=vector_index,
+                fulltext_index_name=fulltext_index,
+                neo4j_database=database,
+                retrieval_query=chunk_retrieval_query,
+                embedder=embedder,
+                result_formatter=_format_chunk_record,
+            )
+            table_retriever = Text2CypherRetriever(
+                driver=driver,
+                llm=llm,
+                neo4j_database=database,
+                neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
+                examples=TEXT2CYPHER_EXAMPLES,
+                custom_prompt=TEXT2CYPHER_PROMPT,
+                result_formatter=_format_table_record,
+            )
+            retriever = DualRetriever(
+                driver=driver,
+                chunk_retriever=chunk_retriever,
+                table_retriever=table_retriever,
+                neo4j_database=database,
             )
         rag = GraphRAG(retriever=retriever, llm=llm)
 
@@ -162,7 +304,7 @@ def main() -> None:
                     "query_text": question_text,
                     "return_context": True,
                 }
-                if args.retriever_mode == "hybrid":
+                if args.retriever_mode in {"hybrid", "dual"}:
                     retriever_config = {
                         "top_k": args.top_k,
                         "effective_search_ratio": args.effective_search_ratio,
