@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,156 @@ def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
     if isinstance(payload, dict):
         return payload.get("answer"), payload.get("evidence")
     return raw_answer, None
+
+
+_MONTH_NAMES = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+)
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _extract_question_constraints(question: str) -> dict[str, Any]:
+    clean = _normalize_text(question)
+
+    years = sorted(set(re.findall(r"\b(?:fy)?((?:19|20)\d{2})\b", clean)))
+    quarter_match = re.findall(r"\bq([1-4])\b", clean)
+    month_hits = [month for month in _MONTH_NAMES if month in clean]
+    period_hints = [
+        hint
+        for hint in (
+            "year end",
+            "year ended",
+            "three months ended",
+            "six months ended",
+            "nine months ended",
+            "quarter ended",
+            "quarters ended",
+            "as of",
+        )
+        if hint in clean
+    ]
+
+    explicit_section_hints = [
+        phrase
+        for phrase in (
+            "income statement",
+            "statement of income",
+            "statements of income",
+            "statement of operations",
+            "statements of operations",
+            "statement of earnings",
+            "statements of earnings",
+            "balance sheet",
+            "balance sheets",
+            "statement of financial position",
+            "cash flow statement",
+            "cash flow statements",
+            "statement of cash flows",
+            "statements of cash flows",
+            "statement of stockholders' equity",
+            "statement of shareholders' equity",
+            "segment information",
+            "quarterly results",
+            "geographic information",
+        )
+        if phrase in clean
+    ]
+
+    generic_table_hints = []
+    for pattern in (
+        r"(note\s+\d+[a-z]?)",
+        r"(table\s+\d+[a-z]?)",
+        r"(item\s+\d+[a-z]?)",
+    ):
+        generic_table_hints.extend(re.findall(pattern, clean))
+
+    return {
+        "years": years,
+        "quarters": quarter_match,
+        "months": month_hits,
+        "period_hints": period_hints,
+        "section_hints": explicit_section_hints + generic_table_hints,
+    }
+
+
+def _build_answer_guidance(question: str) -> str:
+    constraints = _extract_question_constraints(question)
+    lines = [
+        "Answering guidance:",
+        "- Prefer evidence whose section/table wording matches the question's report or section hint.",
+        "- If the question mentions a specific report, section, note, table name, or similar label, prioritize exact matches first and then closely related phrasing.",
+        "- If the exact wording does not appear, pay attention to semantically similar section/table names rather than ignoring the constraint.",
+        "- Respect time constraints strictly: fiscal year, quarter, period-ended phrasing, and explicit dates must match the chosen evidence.",
+        "- If candidate evidence conflicts on statement type or time period, prefer the exact match and avoid mixing periods.",
+    ]
+    if constraints["section_hints"]:
+        lines.append(f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}")
+    if constraints["years"]:
+        lines.append(f"- Extracted years: {', '.join(constraints['years'])}")
+    if constraints["quarters"]:
+        lines.append(f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
+    if constraints["months"]:
+        lines.append(f"- Extracted months/dates context: {', '.join(constraints['months'])}")
+    if constraints["period_hints"]:
+        lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
+    return "\n".join(lines)
+
+
+def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
+    constraints = _extract_question_constraints(question)
+    content = _normalize_text(str(item.content))
+    metadata = item.metadata or {}
+    section_name = _normalize_text(str(metadata.get("section_name") or ""))
+    haystack = " ".join(part for part in (content, section_name) if part)
+
+    score = 0.0
+    for hint in constraints["section_hints"]:
+        if hint in haystack:
+            score += 2.0
+        elif any(token in haystack for token in hint.split()):
+            score += 0.6
+
+    for year in constraints["years"]:
+        if year in haystack:
+            score += 1.5
+
+    for quarter in constraints["quarters"]:
+        q = f"q{quarter}"
+        if q in haystack:
+            score += 1.5
+        if quarter == "1" and "three months ended" in haystack:
+            score += 0.6
+        if quarter == "2" and "six months ended" in haystack:
+            score += 0.6
+
+    for month in constraints["months"]:
+        if month in haystack:
+            score += 0.8
+
+    for period_hint in constraints["period_hints"]:
+        if period_hint in haystack:
+            score += 1.0
+
+    if metadata.get("source") == "table" and (
+        constraints["section_hints"] or constraints["years"] or constraints["period_hints"]
+    ):
+        score += 0.4
+
+    return score
 
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
@@ -155,6 +306,8 @@ class DualRetriever(Retriever):
                 continue
             seen_contents.add(content)
             items.append(item)
+
+        items.sort(key=lambda item: _candidate_bonus(query_text, item), reverse=True)
 
         return RetrieverResult(
             items=items,
@@ -330,6 +483,7 @@ def main() -> None:
                 search_kwargs = {
                     "query_text": question_text,
                     "return_context": True,
+                    "examples": _build_answer_guidance(row["question"]),
                 }
                 if args.retriever_mode in {"hybrid", "dual"}:
                     retriever_config = {
