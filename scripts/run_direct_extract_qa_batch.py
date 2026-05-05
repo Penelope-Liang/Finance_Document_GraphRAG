@@ -308,9 +308,10 @@ def main() -> None:
                     retriever_config = {
                         "top_k": args.top_k,
                         "effective_search_ratio": args.effective_search_ratio,
+                        "query_params": {
+                            "doc_id": row["doc_id"] if args.restrict_doc_id else None
+                        },
                     }
-                    if args.restrict_doc_id:
-                        retriever_config["query_params"] = {"doc_id": row["doc_id"]}
                     search_kwargs["retriever_config"] = retriever_config
 
                 result = rag.search(**search_kwargs)
