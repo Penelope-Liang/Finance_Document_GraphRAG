@@ -55,6 +55,11 @@ def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
     return raw_answer, None
 
 
+def _extract_json_object(text: str) -> str | None:
+    match = re.search(r"\{.*\}", text or "", flags=re.DOTALL)
+    return match.group(0) if match else None
+
+
 _MONTH_NAMES = (
     "january",
     "february",
@@ -203,6 +208,132 @@ def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
         score += 0.4
 
     return score
+
+
+def _format_judge_candidate(index: int, item: RetrieverResultItem, max_chars: int = 1200) -> str:
+    metadata = item.metadata or {}
+    section_name = str(metadata.get("section_name") or "")
+    source = str(metadata.get("source") or "")
+    row_header = str(metadata.get("row_header") or "")
+    col_header = str(metadata.get("col_header") or "")
+    content = str(item.content or "")[:max_chars]
+    return (
+        f"[ID: {index}]\n"
+        f"Source: {source}\n"
+        f"Section: {section_name}\n"
+        f"Row Header: {row_header}\n"
+        f"Col Header: {col_header}\n"
+        f"Content:\n{content}"
+    )
+
+
+def _judge_prompt(query_text: str, items: list[RetrieverResultItem], max_chars: int) -> str:
+    constraints = _extract_question_constraints(query_text)
+    candidates_text = "\n\n".join(
+        _format_judge_candidate(i, item, max_chars=max_chars)
+        for i, item in enumerate(items)
+    )
+    hints = []
+    if constraints["section_hints"]:
+        hints.append(f"Section/table hints: {', '.join(constraints['section_hints'])}")
+    if constraints["years"]:
+        hints.append(f"Years: {', '.join(constraints['years'])}")
+    if constraints["quarters"]:
+        hints.append(f"Quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
+    if constraints["months"]:
+        hints.append(f"Months: {', '.join(constraints['months'])}")
+    if constraints["period_hints"]:
+        hints.append(f"Period hints: {', '.join(constraints['period_hints'])}")
+    hint_block = "\n".join(f"- {line}" for line in hints) if hints else "- No explicit structured hints extracted."
+    return f"""
+You are filtering retrieved evidence for a financial question.
+
+Task:
+- Keep all candidates that are not clearly irrelevant.
+- Prefer false positives over false negatives.
+- Prioritize candidates matching the question's statement/section/table hints and time constraints.
+- A candidate does not need to directly answer the question; keep it if it may help answer.
+
+Question:
+{query_text}
+
+Extracted constraints:
+{hint_block}
+
+Candidate evidence:
+{candidates_text}
+
+Return only a JSON object with this exact schema:
+{{"ids": [0, 2, 5]}}
+
+Rules:
+- IDs must be chosen only from the listed candidates.
+- Return at least 5 IDs if 5 or more candidates are available, unless almost everything is clearly irrelevant.
+- Return an empty list only if no candidate is plausibly useful.
+""".strip()
+
+
+class LLMJudgeRetriever(Retriever):
+    VERIFY_NEO4J_VERSION = False
+
+    def __init__(
+        self,
+        inner_retriever: Retriever,
+        llm: OllamaLLM,
+        judge_max_chars: int = 1200,
+        neo4j_database: str | None = None,
+    ) -> None:
+        super().__init__(
+            driver=inner_retriever.driver,
+            neo4j_database=neo4j_database or getattr(inner_retriever, "neo4j_database", None),
+        )
+        self.inner_retriever = inner_retriever
+        self.llm = llm
+        self.judge_max_chars = judge_max_chars
+
+    def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
+        raise NotImplementedError("LLMJudgeRetriever wraps search(), not raw Neo4j records.")
+
+    def search(self, *args: Any, **kwargs: Any) -> RetrieverResult:
+        result = self.inner_retriever.search(*args, **kwargs)
+        if not result.items:
+            return result
+
+        query_text = kwargs.get("query_text") or (args[0] if args else "")
+        if not query_text:
+            return RetrieverResult(
+                items=result.items,
+                metadata={**(result.metadata or {}), "llm_judge_applied": False},
+            )
+
+        prompt = _judge_prompt(query_text, result.items, self.judge_max_chars)
+        try:
+            response = self.llm.invoke(prompt)
+            payload_text = _extract_json_object(response.content) or response.content
+            payload = json.loads(payload_text)
+            ids = payload.get("ids", []) if isinstance(payload, dict) else []
+            if not isinstance(ids, list):
+                ids = []
+            judged_items = [
+                result.items[i]
+                for i in ids
+                if isinstance(i, int) and 0 <= i < len(result.items)
+            ]
+            if not judged_items:
+                judged_items = result.items
+            return RetrieverResult(
+                items=judged_items,
+                metadata={
+                    **(result.metadata or {}),
+                    "llm_judge_applied": True,
+                    "llm_judge_kept": len(judged_items),
+                },
+            )
+        except Exception:
+            return RetrieverResult(
+                items=result.items,
+                metadata={**(result.metadata or {}), "llm_judge_applied": False},
+            )
 
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
@@ -370,6 +501,22 @@ def main() -> None:
         default=20,
         help="Number of candidates to fetch before reranking.",
     )
+    parser.add_argument(
+        "--use-llm-judge",
+        action="store_true",
+        help="Apply an LLM-based evidence filter after retrieval and before answer generation.",
+    )
+    parser.add_argument(
+        "--llm-judge-max-chars",
+        type=int,
+        default=1200,
+        help="Max chars per candidate item shown to the LLM judge.",
+    )
+    parser.add_argument(
+        "--llm-judge-model",
+        default=os.environ.get("OLLAMA_JUDGE_MODEL", "qwen3:14b"),
+        help="Ollama model used only for evidence judging.",
+    )
     args = parser.parse_args()
 
     uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
@@ -389,6 +536,11 @@ def main() -> None:
     questions = _load_questions(Path(args.questions_path))
     llm = OllamaLLM(
         model_name=llm_model,
+        model_params={"options": {"temperature": 0}},
+        **ollama_kwargs,
+    )
+    judge_llm = OllamaLLM(
+        model_name=args.llm_judge_model,
         model_params={"options": {"temperature": 0}},
         **ollama_kwargs,
     )
@@ -471,6 +623,13 @@ def main() -> None:
                 inner_retriever=retriever,
                 cross_encoder_model=args.reranker_model,
                 top_k_retrieve=args.reranker_top_k_retrieve,
+            )
+        if args.use_llm_judge:
+            retriever = LLMJudgeRetriever(
+                inner_retriever=retriever,
+                llm=judge_llm,
+                judge_max_chars=args.llm_judge_max_chars,
+                neo4j_database=database,
             )
 
         rag = GraphRAG(retriever=retriever, llm=llm)
