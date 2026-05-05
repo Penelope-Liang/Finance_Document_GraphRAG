@@ -11,7 +11,11 @@ import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
-from neo4j_graphrag.retrievers import HybridCypherRetriever, Text2CypherRetriever
+from neo4j_graphrag.retrievers import (
+    HybridCypherRetriever,
+    RerankingRetriever,
+    Text2CypherRetriever,
+)
 from neo4j_graphrag.retrievers.base import Retriever
 from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResultItem
 
@@ -197,6 +201,22 @@ def main() -> None:
         action="store_true",
         help="Diagnostic mode: restrict hybrid evidence to the target doc_id.",
     )
+    parser.add_argument(
+        "--use-reranker",
+        action="store_true",
+        help="Wrap the chosen retriever with the existing CrossEncoder reranker.",
+    )
+    parser.add_argument(
+        "--reranker-model",
+        default=os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
+        help="Sentence-transformers CrossEncoder model for reranking.",
+    )
+    parser.add_argument(
+        "--reranker-top-k-retrieve",
+        type=int,
+        default=20,
+        help="Number of candidates to fetch before reranking.",
+    )
     args = parser.parse_args()
 
     uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
@@ -293,6 +313,13 @@ def main() -> None:
                 table_retriever=table_retriever,
                 neo4j_database=database,
             )
+        if args.use_reranker:
+            retriever = RerankingRetriever(
+                inner_retriever=retriever,
+                cross_encoder_model=args.reranker_model,
+                top_k_retrieve=args.reranker_top_k_retrieve,
+            )
+
         rag = GraphRAG(retriever=retriever, llm=llm)
 
         for idx, row in enumerate(questions, start=1):
