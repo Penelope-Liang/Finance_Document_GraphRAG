@@ -28,6 +28,11 @@ from neo4j_graphrag.types import RawSearchResult, RetrieverResult
 logger = logging.getLogger(__name__)
 
 
+def _is_cuda_oom_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "cuda out of memory" in text or "cuda error: out of memory" in text
+
+
 def _get_cross_encoder(model: Union[str, Any]):
     """Resolve CrossEncoder from model name or instance."""
     if hasattr(model, "predict"):
@@ -120,14 +125,38 @@ class RerankingRetriever(Retriever):
             )
 
         pairs = [(query_text, item.content) for item in result.items]
+        ce = self._get_ce()
         try:
-            scores = self._get_ce().predict(pairs, show_progress_bar=False)
+            scores = ce.predict(pairs, show_progress_bar=False)
         except Exception as e:
-            logger.warning("CrossEncoder predict failed: %s; returning un-reranked.", e)
-            return RetrieverResult(
-                items=result.items[:top_k],
-                metadata={**(result.metadata or {}), "reranked": False},
-            )
+            if _is_cuda_oom_error(e):
+                logger.warning(
+                    "CrossEncoder predict failed on GPU due to OOM: %s; retrying on CPU.",
+                    e,
+                )
+                try:
+                    if hasattr(ce, "model") and hasattr(ce.model, "to"):
+                        ce.model.to("cpu")
+                    scores = ce.predict(pairs, show_progress_bar=False)
+                except Exception as cpu_e:
+                    logger.warning(
+                        "CrossEncoder CPU fallback failed: %s; returning un-reranked.",
+                        cpu_e,
+                    )
+                    return RetrieverResult(
+                        items=result.items[:top_k],
+                        metadata={
+                            **(result.metadata or {}),
+                            "reranked": False,
+                            "reranker_cpu_fallback": False,
+                        },
+                    )
+            else:
+                logger.warning("CrossEncoder predict failed: %s; returning un-reranked.", e)
+                return RetrieverResult(
+                    items=result.items[:top_k],
+                    metadata={**(result.metadata or {}), "reranked": False},
+                )
 
         if hasattr(scores, "tolist"):
             scores = scores.tolist()
