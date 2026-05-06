@@ -197,19 +197,34 @@ def _is_toc_like_text(text: str, is_table: bool) -> bool:
         return False
     if "table of contents" in clean or "beginning page" in clean:
         return True
+
+    item_hits = len(re.findall(r"\bitem\s+\d+[a-z]?\b", clean))
+    note_hits = len(re.findall(r"\bnote\s+\d+\b", clean))
+    page_number_hits = len(re.findall(r"\b\d{1,3}\b", clean))
+    dotleader_hits = len(re.findall(r"\.{3,}\s*\d{1,3}\b", clean))
+
+    # "financial statements and supplementary data" is also a normal section heading
+    # in the body of 10-K filings, not just in the table of contents.  Treat it as
+    # an auxiliary signal only — it must be accompanied by clear TOC formatting
+    # (Item listings, dot-leaders, or an explicit ToC header) before we filter.
+    has_financial_statements_section = "financial statements and supplementary data" in clean
+    has_clear_toc_signal = (
+        item_hits >= 3
+        or dotleader_hits >= 3
+    )
+    if has_financial_statements_section and has_clear_toc_signal:
+        return True
+
     continued_hits = sum(
         1
         for phrase in (
             "continued",
             "form 10-k summary",
-            "financial statements and supplementary data",
+            # "financial statements and supplementary data" removed — handled above
             "index to financial statements",
         )
         if phrase in clean
     )
-    item_hits = len(re.findall(r"\bitem\s+\d+[a-z]?\b", clean))
-    note_hits = len(re.findall(r"\bnote\s+\d+\b", clean))
-    page_number_hits = len(re.findall(r"\b\d{1,3}\b", clean))
     toc_label_hits = sum(
         clean.count(label)
         for label in (

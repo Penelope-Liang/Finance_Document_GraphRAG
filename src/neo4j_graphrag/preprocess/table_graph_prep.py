@@ -60,13 +60,8 @@ _PERCENT_CONTEXT_HINTS = (
     "%of total",
     "% change",
     "%change",
-    "change",
-    "sales change",
-    "total sales change",
-    "mix",
-    "growth",
-    "translation",
-    "divestitures",
+    # Removed: "change", "mix", "growth", "translation", "divestitures" —
+    # these words appear on dollar-amount rows too and caused false PERCENT labels.
 )
 _ROW_PERCENT_HINTS = (
     "price",
@@ -209,12 +204,27 @@ def _extract_number(text: str) -> Optional[float]:
 def _infer_scale(texts: list[str]) -> tuple[str, float]:
     haystack = " ".join(_normalize_space(text).casefold() for text in texts if text).strip()
     for label, factor in _SCALE_HINTS:
-        if f"in {label}" in haystack or label in haystack:
+        # Require the scale word to appear in an explicit unit annotation context,
+        # not as a bare word anywhere in cell content (e.g. "5 billion customers").
+        if (
+            f"in {label}" in haystack
+            or f"in {label}s" in haystack
+            or f"({label}" in haystack
+            or f"({label}s" in haystack
+            or f"{label}s)" in haystack
+            or f"{label})" in haystack
+        ):
             return label, factor
     return "", 1.0
 
 
-def _infer_numeric_kind(text: str, row_header: str = "", col_header: str = "", section_name: str = "") -> str:
+def _infer_numeric_kind(
+    text: str,
+    row_header: str = "",
+    col_header: str = "",
+    section_name: str = "",
+    has_scale: bool = False,
+) -> str:
     clean = _normalize_space(text)
     normalized_row_header = _normalize_space(row_header).casefold()
     context = " ".join(
@@ -224,16 +234,33 @@ def _infer_numeric_kind(text: str, row_header: str = "", col_header: str = "", s
     )
     compact_context = context.replace(" ", "")
     compact_row_header = normalized_row_header.replace(" ", "")
+
+    # Explicit PERCENT signals: % symbol, or unambiguous percentage context words.
+    # Removed broad terms like "change", "growth", "translation", "divestitures"
+    # which frequently appear on dollar-amount rows too.
     if "%" in clean or any(hint in context or hint.replace(" ", "") in compact_context for hint in _PERCENT_CONTEXT_HINTS):
         return "PERCENT"
     if any(hint in normalized_row_header or hint.replace(" ", "") in compact_row_header for hint in _ROW_PERCENT_HINTS):
         return "PERCENT"
-    if any(token in clean for token in ("$", "€", "£", "¥")):
-        return "AMOUNT"
-    if any(token in context for token in ("sales", "income", "taxes", "assets", "debt", "cash", "revenue", "expense")):
-        return "AMOUNT"
+
+    # Explicit PLAIN signals: per-share or ratio metrics that should never be scaled.
     if any(token in context for token in ("per share", "eps", "diluted share", "basic share")):
         return "PLAIN"
+
+    # Explicit currency symbol → always AMOUNT.
+    if any(token in clean for token in ("$", "€", "£", "¥")):
+        return "AMOUNT"
+
+    # Known financial statement line items → AMOUNT.
+    if any(token in context for token in ("sales", "income", "taxes", "assets", "debt", "cash", "revenue", "expense")):
+        return "AMOUNT"
+
+    # If the table carries a scale (millions/thousands/billions) and the cell is not
+    # clearly PERCENT or PLAIN, treat it as a scaled monetary amount rather than a
+    # bare number, to avoid silently dropping the scale factor.
+    if has_scale:
+        return "AMOUNT"
+
     return "PLAIN"
 
 
@@ -374,7 +401,9 @@ def _classify_grid(
     if not grid:
         return grid
 
-    scale_label, scale_factor = _infer_scale([title_text, section_name, chunk_text] + [cell["text"] for row in grid for cell in row])
+    # Only use the table title and section name to infer scale — not cell content,
+    # which may contain incidental occurrences of "billion"/"million" in non-unit contexts.
+    scale_label, scale_factor = _infer_scale([title_text, section_name, chunk_text])
 
     row_has_number: dict[int, bool] = {}
     col_has_number: dict[int, bool] = {}
@@ -431,6 +460,7 @@ def _classify_grid(
                 row_header=row_header,
                 col_header=col_header,
                 section_name=section_name,
+                has_scale=scale_factor != 1.0,
             )
             normalized_value = cell["numeric_value"]
             applied_scale = ""

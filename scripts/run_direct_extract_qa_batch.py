@@ -46,18 +46,35 @@ def _load_questions(path: Path) -> list[dict]:
     return rows
 
 
+def _strip_think(text: str) -> str:
+    """Remove Qwen3 <think>...</think> reasoning blocks from model output."""
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+
+
 def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
+    cleaned = _strip_think(raw_answer)
+    # First try parsing the cleaned text directly
     try:
-        payload = json.loads(raw_answer)
+        payload = json.loads(cleaned)
     except json.JSONDecodeError:
-        return raw_answer, None
+        # Fall back to extracting the first {...} block
+        json_str = _extract_json_object(cleaned)
+        if json_str:
+            try:
+                payload = json.loads(json_str)
+            except json.JSONDecodeError:
+                return raw_answer, None
+        else:
+            return raw_answer, None
     if isinstance(payload, dict):
         return payload.get("answer"), payload.get("evidence")
     return raw_answer, None
 
 
 def _extract_json_object(text: str) -> str | None:
-    match = re.search(r"\{.*\}", text or "", flags=re.DOTALL)
+    # Strip think blocks first so the greedy .* doesn't span across them
+    cleaned = _strip_think(text)
+    match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
     return match.group(0) if match else None
 
 
