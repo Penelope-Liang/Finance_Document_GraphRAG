@@ -313,8 +313,12 @@ def _attach_fusion_scores(
         elif source == "table":
             source_weight = table_weight
         elif source == "primary_statement":
-            # Strong weight: ensure the actually-named statement chunks dominate the top-k.
-            source_weight = 1.5
+            # Differentiated weight by match_priority:
+            #   3 = both statement_type and section_name match (strongest signal)
+            #   2 = only statement_type matches (PepsiCo-style: section_name lost during ingest)
+            #   1 = only section_name matches (footnote / supplementary table)
+            priority = int((item.metadata or {}).get("match_priority") or 2)
+            source_weight = {3: 1.6, 2: 1.3, 1: 1.0}.get(priority, 1.3)
         else:
             source_weight = 1.0
         fused_score = source_weight * normalized_by_idx[idx] + bonus_weight * bonuses[idx]
@@ -651,11 +655,22 @@ _PRIMARY_STATEMENT_QUERY = """
 MATCH (chunk:Chunk)
 WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
   AND chunk.should_index = true
-  AND chunk.section_name IS NOT NULL
-  AND ANY(pat IN $includes WHERE toLower(chunk.section_name) CONTAINS pat)
-  AND NONE(pat IN $excludes WHERE toLower(chunk.section_name) CONTAINS pat)
-OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+  AND (
+    chunk.statement_type = $statement_type
+    OR (
+      chunk.section_name IS NOT NULL
+      AND ANY(pat IN $includes WHERE toLower(chunk.section_name) CONTAINS pat)
+      AND NONE(pat IN $excludes WHERE toLower(chunk.section_name) CONTAINS pat)
+    )
+  )
 WITH chunk,
+     (CASE WHEN chunk.statement_type = $statement_type THEN 2 ELSE 0 END
+      + CASE WHEN chunk.section_name IS NOT NULL
+                  AND ANY(pat IN $includes WHERE toLower(chunk.section_name) CONTAINS pat)
+                  AND NONE(pat IN $excludes WHERE toLower(chunk.section_name) CONTAINS pat)
+             THEN 1 ELSE 0 END) AS match_priority
+OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WITH chunk, match_priority,
      collect(DISTINCT {
          row_header: cell.row_header,
          col_header: cell.col_header,
@@ -666,9 +681,12 @@ WITH chunk,
      })[0..40] AS table_cells
 RETURN chunk.text AS text,
        chunk.section_name AS section_name,
+       chunk.statement_type AS chunk_statement_type,
        1.0 AS similarity_score,
        table_cells,
-       [] AS entities
+       [] AS entities,
+       match_priority
+ORDER BY match_priority DESC
 LIMIT $limit
 """
 
@@ -715,6 +733,7 @@ class PrimaryStatementRetriever(Retriever):
 
         params = {
             "doc_id": doc_id,
+            "statement_type": spec["name"],
             "includes": list(spec["includes"]),
             "excludes": list(spec["excludes"]),
             "limit": self.limit,
@@ -728,6 +747,8 @@ class PrimaryStatementRetriever(Retriever):
             metadata = dict(item.metadata or {})
             metadata["source"] = "primary_statement"
             metadata["statement_type"] = spec["name"]
+            metadata["chunk_statement_type"] = record.get("chunk_statement_type")
+            metadata["match_priority"] = int(record.get("match_priority") or 0)
             items.append(
                 RetrieverResultItem(content=item.content, metadata=metadata)
             )
