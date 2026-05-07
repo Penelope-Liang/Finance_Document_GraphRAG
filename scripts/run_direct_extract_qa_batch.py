@@ -262,6 +262,10 @@ def _item_base_score(item: RetrieverResultItem) -> float:
         return _safe_float(metadata.get("similarity_score"))
     if source == "table":
         return _table_base_score(item)
+    if source == "primary_statement":
+        # Primary statements are deterministically matched, all are equally relevant
+        # to the question's statement-type hint, so give them a uniform high base.
+        return 1.0
     return 0.0
 
 
@@ -304,7 +308,15 @@ def _attach_fusion_scores(
     for idx, item in enumerate(items):
         metadata = dict(item.metadata or {})
         source = str(metadata.get("source") or "unknown")
-        source_weight = chunk_weight if source == "chunk" else table_weight if source == "table" else 1.0
+        if source == "chunk":
+            source_weight = chunk_weight
+        elif source == "table":
+            source_weight = table_weight
+        elif source == "primary_statement":
+            # Strong weight: ensure the actually-named statement chunks dominate the top-k.
+            source_weight = 1.5
+        else:
+            source_weight = 1.0
         fused_score = source_weight * normalized_by_idx[idx] + bonus_weight * bonuses[idx]
         metadata.update(
             {
@@ -510,6 +522,228 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
     )
 
 
+_DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
+
+# Statement-type detection: hint terms in the question → section_name patterns
+# in Neo4j.  Each entry has:
+#   - hints: substrings to look for in the question
+#   - includes: section_name substring patterns (CONTAINS, case-insensitive)
+#   - excludes: section_name substring patterns to filter OUT false positives
+_PRIMARY_STATEMENT_TYPES = (
+    {
+        "name": "balance_sheet",
+        "hints": (
+            "balance sheet",
+            "balance sheets",
+            "statement of financial position",
+            "statements of financial position",
+        ),
+        "includes": (
+            "balance sheet",
+            "balance sheets",
+            "statement of financial position",
+            "statements of financial position",
+            "financial position",
+        ),
+        "excludes": (
+            "off-balance sheet",
+            "off balance sheet",
+            "balance sheet classification",
+            "balance sheet arrangements",
+            "balance sheet hedge",
+        ),
+    },
+    {
+        "name": "income_statement",
+        "hints": (
+            "income statement",
+            "statement of income",
+            "statements of income",
+            "statement of operations",
+            "statements of operations",
+            "statement of earnings",
+            "statements of earnings",
+            "statement of comprehensive income",
+            "statements of comprehensive income",
+        ),
+        "includes": (
+            "income statement",
+            "income statements",
+            "statement of income",
+            "statements of income",
+            "statement of operations",
+            "statements of operations",
+            "statement of earnings",
+            "statements of earnings",
+            "comprehensive income",
+        ),
+        "excludes": (
+            "other income",
+            "income tax",
+            "interest income",
+            "comprehensive income reclassif",
+        ),
+    },
+    {
+        "name": "cash_flow",
+        "hints": (
+            "cash flow statement",
+            "cash flow statements",
+            "statement of cash flows",
+            "statements of cash flows",
+            "cash flows statement",
+        ),
+        "includes": (
+            "cash flow statement",
+            "cash flow statements",
+            "statement of cash flows",
+            "statements of cash flows",
+            "cash flows from",
+        ),
+        "excludes": (
+            "cash flow hedge",
+            "cash flow hedges",
+            "free cash flow",
+        ),
+    },
+    {
+        "name": "equity_statement",
+        "hints": (
+            "stockholders' equity",
+            "stockholders equity",
+            "shareholders' equity",
+            "shareholders equity",
+            "statement of equity",
+            "statements of equity",
+            "changes in equity",
+        ),
+        "includes": (
+            "stockholders' equity",
+            "stockholders equity",
+            "shareholders' equity",
+            "shareholders equity",
+            "statement of equity",
+            "statements of equity",
+            "changes in equity",
+        ),
+        "excludes": (
+            "equity method",
+            "equity investments",
+        ),
+    },
+)
+
+
+def _detect_statement_type(query_text: str) -> dict[str, Any] | None:
+    clean = _normalize_text(query_text)
+    for spec in _PRIMARY_STATEMENT_TYPES:
+        if any(hint in clean for hint in spec["hints"]):
+            return spec
+    return None
+
+
+def _extract_doc_id(query_text: str) -> str | None:
+    match = _DOC_ID_RE.search(query_text or "")
+    return match.group(1).strip() if match else None
+
+
+_PRIMARY_STATEMENT_QUERY = """
+MATCH (chunk:Chunk)
+WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
+  AND chunk.should_index = true
+  AND chunk.section_name IS NOT NULL
+  AND ANY(pat IN $includes WHERE toLower(chunk.section_name) CONTAINS pat)
+  AND NONE(pat IN $excludes WHERE toLower(chunk.section_name) CONTAINS pat)
+OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WITH chunk,
+     collect(DISTINCT {
+         row_header: cell.row_header,
+         col_header: cell.col_header,
+         text: cell.text,
+         numeric_value: cell.numeric_value,
+         numeric_kind: cell.numeric_kind,
+         scale: cell.scale
+     })[0..40] AS table_cells
+RETURN chunk.text AS text,
+       chunk.section_name AS section_name,
+       1.0 AS similarity_score,
+       table_cells,
+       [] AS entities
+LIMIT $limit
+"""
+
+
+class PrimaryStatementRetriever(Retriever):
+    """Deterministically pulls primary financial statement chunks
+    (balance sheet / income statement / cash flow / equity) by section_name
+    pattern matching, bypassing vector similarity which often ranks MD&A
+    discussions above the actual statements."""
+
+    VERIFY_NEO4J_VERSION = False
+
+    def __init__(
+        self,
+        driver: neo4j.Driver,
+        neo4j_database: str | None = None,
+        limit: int = 8,
+    ) -> None:
+        super().__init__(driver, neo4j_database)
+        self.limit = limit
+
+    def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
+        raise NotImplementedError("PrimaryStatementRetriever uses a custom search implementation.")
+
+    def search(
+        self,
+        query_text: str,
+        query_params: dict[str, Any] | None = None,
+    ) -> RetrieverResult:
+        spec = _detect_statement_type(query_text)
+        doc_id = (query_params or {}).get("doc_id") if query_params else None
+        if doc_id is None:
+            doc_id = _extract_doc_id(query_text)
+
+        if spec is None:
+            return RetrieverResult(
+                items=[],
+                metadata={
+                    "__retriever": "PrimaryStatementRetriever",
+                    "matched": False,
+                    "reason": "no statement type detected",
+                },
+            )
+
+        params = {
+            "doc_id": doc_id,
+            "includes": list(spec["includes"]),
+            "excludes": list(spec["excludes"]),
+            "limit": self.limit,
+        }
+        with self.driver.session(database=self.neo4j_database) as session:
+            records = list(session.run(_PRIMARY_STATEMENT_QUERY, params))
+
+        items = []
+        for record in records:
+            item = _format_chunk_record(record)
+            metadata = dict(item.metadata or {})
+            metadata["source"] = "primary_statement"
+            metadata["statement_type"] = spec["name"]
+            items.append(
+                RetrieverResultItem(content=item.content, metadata=metadata)
+            )
+
+        return RetrieverResult(
+            items=items,
+            metadata={
+                "__retriever": "PrimaryStatementRetriever",
+                "matched": True,
+                "statement_type": spec["name"],
+                "doc_id": doc_id,
+                "kept": len(items),
+            },
+        )
+
+
 class DualRetriever(Retriever):
     VERIFY_NEO4J_VERSION = False
 
@@ -518,11 +752,13 @@ class DualRetriever(Retriever):
         driver: neo4j.Driver,
         chunk_retriever: HybridCypherRetriever,
         table_retriever: Text2CypherRetriever,
+        primary_retriever: PrimaryStatementRetriever | None = None,
         neo4j_database: str | None = None,
     ) -> None:
         super().__init__(driver, neo4j_database)
         self.chunk_retriever = chunk_retriever
         self.table_retriever = table_retriever
+        self.primary_retriever = primary_retriever
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
         raise NotImplementedError("DualRetriever uses a custom search implementation.")
@@ -541,11 +777,17 @@ class DualRetriever(Retriever):
             query_params=query_params,
         )
         table_result = self.table_retriever.search(query_text=query_text)
+        primary_result = (
+            self.primary_retriever.search(query_text=query_text, query_params=query_params)
+            if self.primary_retriever is not None
+            else RetrieverResult(items=[], metadata={"__retriever": "PrimaryStatementRetriever", "matched": False})
+        )
 
         items: list[RetrieverResultItem] = []
         seen_contents: set[str] = set()
 
-        for item in table_result.items + chunk_result.items:
+        # Order matters: primary statements first so they win ties on dedup.
+        for item in primary_result.items + table_result.items + chunk_result.items:
             content = str(item.content)
             if content in seen_contents:
                 continue
@@ -564,6 +806,7 @@ class DualRetriever(Retriever):
                 "__retriever": "DualRetriever",
                 "chunk_retriever": chunk_result.metadata,
                 "table_retriever": table_result.metadata,
+                "primary_retriever": primary_result.metadata,
                 "fusion": {
                     "strategy": "source_softmax_plus_constraint_bonus",
                     "chunk_weight": 0.5,
@@ -736,10 +979,15 @@ def main() -> None:
                 custom_prompt=TEXT2CYPHER_PROMPT,
                 result_formatter=_format_table_record,
             )
+            primary_retriever = PrimaryStatementRetriever(
+                driver=driver,
+                neo4j_database=database,
+            )
             retriever = DualRetriever(
                 driver=driver,
                 chunk_retriever=chunk_retriever,
                 table_retriever=table_retriever,
+                primary_retriever=primary_retriever,
                 neo4j_database=database,
             )
         if args.use_reranker:
