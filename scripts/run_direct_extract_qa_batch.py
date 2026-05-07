@@ -162,7 +162,7 @@ def _extract_question_constraints(question: str) -> dict[str, Any]:
     }
 
 
-def _build_answer_guidance(question: str) -> str:
+def _build_direct_extract_answer_guidance(question: str) -> str:
     constraints = _extract_question_constraints(question)
     lines = [
         "Answering guidance:",
@@ -183,6 +183,37 @@ def _build_answer_guidance(question: str) -> str:
     if constraints["period_hints"]:
         lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
     return "\n".join(lines)
+
+
+def _build_calculation_answer_guidance(question: str) -> str:
+    constraints = _extract_question_constraints(question)
+    lines = [
+        "Calculation guidance:",
+        "- First identify every required input value before answering.",
+        "- Use only evidence that matches the question's requested statement, section/table hint, and time period.",
+        "- For ratios, margins, averages, YoY changes, turnover, DPO, CCC, or CAGR, gather all required numerator/denominator or multi-period inputs before computing.",
+        "- Do not answer from a single value if the metric requires multiple inputs.",
+        "- If multiple candidate values are available, prefer the exact statement and period match.",
+        "- If any required input is missing or period alignment is ambiguous, return insufficient information instead of guessing.",
+        "- Keep the computation simple and explicit: identify inputs, apply the formula, then provide the final answer.",
+    ]
+    if constraints["section_hints"]:
+        lines.append(f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}")
+    if constraints["years"]:
+        lines.append(f"- Extracted years: {', '.join(constraints['years'])}")
+    if constraints["quarters"]:
+        lines.append(f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
+    if constraints["months"]:
+        lines.append(f"- Extracted months/dates context: {', '.join(constraints['months'])}")
+    if constraints["period_hints"]:
+        lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
+    return "\n".join(lines)
+
+
+def _build_answer_guidance(question: str, question_style: str) -> str:
+    if question_style == "calculation":
+        return _build_calculation_answer_guidance(question)
+    return _build_direct_extract_answer_guidance(question)
 
 
 def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
@@ -869,6 +900,12 @@ def main() -> None:
         help="Hybrid candidate expansion factor before final top-k.",
     )
     parser.add_argument(
+        "--question-style",
+        choices=["direct", "calculation"],
+        default="direct",
+        help="Prompt style for direct extraction vs metrics calculation questions.",
+    )
+    parser.add_argument(
         "--restrict-doc-id",
         action="store_true",
         help="Diagnostic mode: restrict hybrid evidence to the target doc_id.",
@@ -1035,7 +1072,7 @@ def main() -> None:
                 search_kwargs = {
                     "query_text": question_text,
                     "return_context": True,
-                    "examples": _build_answer_guidance(row["question"]),
+                    "examples": _build_answer_guidance(row["question"], args.question_style),
                 }
                 if args.retriever_mode in {"hybrid", "dual"}:
                     retriever_config = {
