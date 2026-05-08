@@ -105,6 +105,11 @@ def _load_questions(path: Path) -> list[dict]:
     return rows
 
 
+def _save_results(output_path: Path, results: list[dict[str, Any]]) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def _strip_think(text: str) -> str:
     """Remove Qwen3 <think>...</think> reasoning blocks from model output."""
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
@@ -1062,6 +1067,7 @@ def main() -> None:
            entities
     """
 
+    output_path = Path(args.output)
     results = []
     with neo4j.GraphDatabase.driver(uri, auth=(user, password)) as driver:
         text2cypher_examples = _select_text2cypher_examples(args.question_style)
@@ -1133,7 +1139,10 @@ def main() -> None:
 
         for idx, row in enumerate(questions, start=1):
             question_text = f"[doc_id={row['doc_id']}] {row['question']}"
-            print(f"[{idx}/{len(questions)}] {row['doc_id']} :: {row['question_id']}")
+            print(
+                f"[{idx}/{len(questions)}] {row['doc_id']} :: {row['question_id']}",
+                flush=True,
+            )
             start = time.time()
             try:
                 search_kwargs = {
@@ -1174,7 +1183,8 @@ def main() -> None:
                         "error": None,
                     }
                 )
-                print(f"  answer={answer!r} gold={row['gold_answer']}")
+                _save_results(output_path, results)
+                print(f"  answer={answer!r} gold={row['gold_answer']}", flush=True)
             except Exception as exc:
                 elapsed = round(time.time() - start, 2)
                 results.append(
@@ -1192,12 +1202,11 @@ def main() -> None:
                         "error": str(exc),
                     }
                 )
-                print(f"  error={exc}")
+                _save_results(output_path, results)
+                print(f"  error={exc}", flush=True)
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\nSaved results to {output_path}")
+    _save_results(output_path, results)
+    print(f"\nSaved results to {output_path}", flush=True)
 
 
 if __name__ == "__main__":
