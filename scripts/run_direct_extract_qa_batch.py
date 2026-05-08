@@ -28,6 +28,65 @@ from neo4j_graphrag.tools.batch_ask import (
 )
 
 
+TEXT2CYPHER_EXAMPLES_CALCULATION = [
+    """User: What is the year over year change in revenue for Amazon from FY2016 to FY2017? Answer as a percentage.
+Cypher:
+MATCH (ch:Chunk {doc_id: "AMAZON_2017_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE cell.row_header IN ["Net sales", "Total net sales", "Net revenues", "Total revenues", "Revenue"]
+  AND (cell.col_header CONTAINS "2017" OR cell.col_header CONTAINS "2016")
+  AND toLower(ch.section_name) CONTAINS "statements of operations"
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY cell.col_header DESC""",
+    """User: What was Block's revenue growth rate from FY2019 to FY2020? Answer as a percentage.
+Cypher:
+MATCH (ch:Chunk {doc_id: "BLOCK_2020_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE cell.row_header IN ["Total net revenue", "Total net revenues", "Net revenue", "Total revenue", "Total revenues", "Revenue", "Revenues"]
+  AND (cell.col_header CONTAINS "2020" OR cell.col_header CONTAINS "2019")
+  AND toLower(ch.section_name) CONTAINS "statement of operations"
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY cell.col_header DESC""",
+    """User: What is the three-year average net profit margin for Best Buy over FY2015 to FY2017?
+Cypher:
+MATCH (ch:Chunk {doc_id: "BESTBUY_2017_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE cell.row_header IN ["Revenue", "Net earnings", "Net income"]
+  AND (cell.col_header CONTAINS "2017" OR cell.col_header CONTAINS "2016" OR cell.col_header CONTAINS "2015")
+  AND toLower(ch.section_name) CONTAINS "statement of earnings"
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY cell.row_header, cell.col_header DESC""",
+    """User: What is PepsiCo's FY2022 unadjusted EBITDA less capital expenditure in USD millions?
+Cypher:
+MATCH (ch:Chunk {doc_id: "PEPSICO_2022_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE cell.row_header IN ["Net cash provided by operating activities", "Capital spending", "Capital expenditures"]
+  AND cell.col_header CONTAINS "2022"
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY cell.row_header""",
+]
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -189,6 +248,7 @@ def _build_calculation_answer_guidance(question: str) -> str:
     constraints = _extract_question_constraints(question)
     lines = [
         "Calculation guidance:",
+        "- This is a metrics calculation question, not a direct single-value extraction question.",
         "- First identify every required input value before answering.",
         "- Use only evidence that matches the question's requested statement, section/table hint, and time period.",
         "- For ratios, margins, averages, YoY changes, turnover, DPO, CCC, or CAGR, gather all required numerator/denominator or multi-period inputs before computing.",
@@ -214,6 +274,12 @@ def _build_answer_guidance(question: str, question_style: str) -> str:
     if question_style == "calculation":
         return _build_calculation_answer_guidance(question)
     return _build_direct_extract_answer_guidance(question)
+
+
+def _select_text2cypher_examples(question_style: str) -> list[str]:
+    if question_style == "calculation":
+        return TEXT2CYPHER_EXAMPLES_CALCULATION
+    return TEXT2CYPHER_EXAMPLES
 
 
 def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
@@ -998,13 +1064,14 @@ def main() -> None:
 
     results = []
     with neo4j.GraphDatabase.driver(uri, auth=(user, password)) as driver:
+        text2cypher_examples = _select_text2cypher_examples(args.question_style)
         if args.retriever_mode == "text2cypher":
             retriever = Text2CypherRetriever(
                 driver=driver,
                 llm=llm,
                 neo4j_database=database,
                 neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
-                examples=TEXT2CYPHER_EXAMPLES,
+                examples=text2cypher_examples,
                 custom_prompt=TEXT2CYPHER_PROMPT,
                 result_formatter=_format_table_record,
             )
@@ -1033,7 +1100,7 @@ def main() -> None:
                 llm=llm,
                 neo4j_database=database,
                 neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
-                examples=TEXT2CYPHER_EXAMPLES,
+                examples=text2cypher_examples,
                 custom_prompt=TEXT2CYPHER_PROMPT,
                 result_formatter=_format_table_record,
             )
