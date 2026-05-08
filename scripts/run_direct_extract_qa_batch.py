@@ -1146,7 +1146,7 @@ def main() -> None:
         rag = GraphRAG(retriever=retriever, llm=llm)
 
         for idx, row in enumerate(questions, start=1):
-            question_text = f"[doc_id={row['doc_id']}] {row['question']}"
+            question_text = row["question"]
             print(
                 f"[{idx}/{len(questions)}] {row['doc_id']} :: {row['question_id']}",
                 flush=True,
