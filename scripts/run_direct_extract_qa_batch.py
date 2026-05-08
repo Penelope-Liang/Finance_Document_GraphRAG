@@ -948,6 +948,12 @@ def main() -> None:
         help="Path to the direct-extraction question set.",
     )
     parser.add_argument(
+        "--max-questions",
+        type=int,
+        default=0,
+        help="Optional cap on the number of questions to run (0 means all).",
+    )
+    parser.add_argument(
         "--output",
         default="output/direct_extract_13_batch_results.json",
         help="Path to save batch results.",
@@ -1030,6 +1036,8 @@ def main() -> None:
         ollama_kwargs["host"] = ollama_host
 
     questions = _load_questions(Path(args.questions_path))
+    if args.max_questions > 0:
+        questions = questions[: args.max_questions]
     llm = OllamaLLM(
         model_name=llm_model,
         model_params={"options": {"temperature": 0}},
