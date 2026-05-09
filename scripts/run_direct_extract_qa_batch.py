@@ -29,12 +29,98 @@ from neo4j_graphrag.tools.batch_ask import (
 
 
 TEXT2CYPHER_EXAMPLES_CALCULATION = [
+    """User: What is the FY2019 fixed asset turnover ratio for Activision Blizzard? Fixed asset turnover ratio is defined as: FY2019 revenue / (average PP&E between FY2018 and FY2019). Round your answer to two decimal places.
+Cypher:
+MATCH (ch:Chunk {doc_id: "ACTIVISIONBLIZZARD_2019_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE (
+        cell.row_header IN [
+            "Net revenues",
+            "Net revenue",
+            "Total net revenues",
+            "Revenues",
+            "Revenue"
+        ]
+        AND cell.col_header CONTAINS "2019"
+        AND toLower(ch.section_name) CONTAINS "statement of operations"
+      )
+   OR (
+        cell.row_header IN [
+            "Property and equipment, net",
+            "Property and equipment",
+            "Property, plant and equipment, net",
+            "Property, plant and equipment"
+        ]
+        AND (cell.col_header CONTAINS "2019" OR cell.col_header CONTAINS "2018")
+        AND (
+            toLower(ch.section_name) CONTAINS "financial position"
+            OR toLower(ch.section_name) CONTAINS "balance sheet"
+        )
+      )
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY row_header, col_header DESC""",
     """User: What is the year over year change in revenue for Amazon from FY2016 to FY2017? Answer as a percentage.
 Cypher:
 MATCH (ch:Chunk {doc_id: "AMAZON_2017_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
 WHERE cell.row_header IN ["Net sales", "Total net sales", "Net revenues", "Total revenues", "Revenue"]
   AND (cell.col_header CONTAINS "2017" OR cell.col_header CONTAINS "2016")
   AND toLower(ch.section_name) CONTAINS "statements of operations"
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY cell.col_header DESC""",
+    """User: What is the FY2015 operating cash flow ratio for Adobe? Operating cash flow ratio is defined as: cash from operations / total current liabilities. Round your answer to two decimal places.
+Cypher:
+MATCH (ch:Chunk {doc_id: "ADOBE_2015_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE (
+        cell.row_header IN [
+            "Net cash provided by operating activities",
+            "Cash flow from operating activities",
+            "Cash provided by operating activities"
+        ]
+        AND cell.col_header CONTAINS "2015"
+        AND toLower(ch.section_name) CONTAINS "cash flows"
+      )
+   OR (
+        cell.row_header IN [
+            "Total current liabilities",
+            "Current liabilities"
+        ]
+        AND cell.col_header CONTAINS "2015"
+        AND (
+            toLower(ch.section_name) CONTAINS "financial position"
+            OR toLower(ch.section_name) CONTAINS "balance sheet"
+        )
+      )
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY row_header, col_header DESC""",
+    """User: What is Adobe's year-over-year change in unadjusted operating income from FY2015 to FY2016? Round your answer to one decimal place and answer as a percentage.
+Cypher:
+MATCH (ch:Chunk {doc_id: "ADOBE_2016_10K.pdf"})-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE cell.row_header IN [
+    "Operating income",
+    "Income from operations"
+]
+  AND (cell.col_header CONTAINS "2016" OR cell.col_header CONTAINS "2015")
+  AND (
+      toLower(ch.section_name) CONTAINS "statement of income"
+      OR toLower(ch.section_name) CONTAINS "statement of operations"
+  )
 RETURN ch.section_name AS section_name,
        cell.row_header AS row_header,
        cell.col_header AS col_header,
@@ -85,6 +171,40 @@ RETURN ch.section_name AS section_name,
        cell.scale AS scale
 ORDER BY cell.row_header""",
 ]
+
+
+TEXT2CYPHER_PROMPT_CALCULATION = """
+Task: Generate a Cypher statement for answering a financial-report calculation question over a Neo4j graph.
+
+Schema:
+{schema}
+
+Examples:
+{examples}
+
+Rules:
+- Return only Cypher. No prose.
+- This is a calculation question, so retrieve every input needed for the formula instead of a single final value.
+- Prefer TableCell evidence over Chunk text for calculation inputs whenever possible.
+- For ratios, margins, averages, YoY changes, turnover, DPO, CCC, or CAGR, fetch all required numerator/denominator rows and all required years/periods.
+- For statement-constrained questions, prefer primary statement sections and include section filters when the question names the statement.
+- Use row_header aliases when the same metric may appear under multiple common labels.
+- Do not use LIMIT 1 unless the question truly needs only one input row.
+- Return the minimal structured evidence needed to compute the metric:
+  ch.section_name AS section_name,
+  cell.row_header AS row_header,
+  cell.col_header AS col_header,
+  cell.text AS text,
+  cell.numeric_value AS numeric_value,
+  cell.numeric_kind AS numeric_kind,
+  cell.scale AS scale
+- Order rows so the downstream answer model can easily compute from them, usually by row_header and col_header.
+
+Question:
+{query_text}
+
+Cypher query:
+"""
 
 
 def _require_env(name: str) -> str:
@@ -261,6 +381,7 @@ def _build_calculation_answer_guidance(question: str) -> str:
         "- If multiple candidate values are available, prefer the exact statement and period match.",
         "- If any required input is missing or period alignment is ambiguous, return insufficient information instead of guessing.",
         "- Keep the computation simple and explicit: identify inputs, apply the formula, then provide the final answer.",
+        "- Return JSON with keys 'answer' and 'evidence'. In evidence, briefly name the rows/periods used in the calculation.",
     ]
     if constraints["section_hints"]:
         lines.append(f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}")
@@ -285,6 +406,87 @@ def _select_text2cypher_examples(question_style: str) -> list[str]:
     if question_style == "calculation":
         return TEXT2CYPHER_EXAMPLES_CALCULATION
     return TEXT2CYPHER_EXAMPLES
+
+
+def _select_text2cypher_prompt(question_style: str) -> str:
+    if question_style == "calculation":
+        return TEXT2CYPHER_PROMPT_CALCULATION
+    return TEXT2CYPHER_PROMPT
+
+
+def _classify_question_style_auto(question: str) -> tuple[str, float, str]:
+    """Rule-only router: metrics-calculation vs direct single-value extraction.
+
+    Returns (effective_style, confidence in [0,1], short reason for logging / results JSON).
+    LLM fallback can be added later for ambiguous cases.
+    """
+    q = (question or "").lower()
+    hits: list[str] = []
+
+    def hit(tag: str) -> None:
+        if tag not in hits:
+            hits.append(tag)
+
+    if "defined as" in q:
+        hit("defined_as")
+    if "cagr" in q:
+        hit("cagr")
+    if re.search(r"\byoy\b", q) or "year-over-year" in q or "year over year" in q:
+        hit("yoy")
+    if re.search(r"\bratio\b", q):
+        hit("ratio")
+    if re.search(r"\bmargins?\b", q):
+        hit("margin")
+    if re.search(r"\baverage\b", q):
+        hit("average")
+    if re.search(r"\bgrowth\b", q):
+        hit("growth")
+    if re.search(r"\bturnover\b", q):
+        hit("turnover")
+    if re.search(r"\bdpo\b", q) or re.search(r"\bccc\b", q):
+        hit("dpo_ccc")
+    if re.search(r"\broa\b", q) or "return on assets" in q or "return on asset" in q:
+        hit("roa")
+    if "% of revenue" in q or "percent of revenue" in q or "percentage of revenue" in q:
+        hit("pct_of_revenue")
+    if re.search(r"between\s+fy", q):
+        hit("between_fy")
+    if re.search(r"fy\s*\d{4}\s*[-–]\s*fy\s*\d{4}", q):
+        hit("multi_fy_dash")
+    if re.search(r"from\s+fy\s*\d{4}\s+to\s+fy\s*\d{4}", q):
+        hit("from_fy_to_fy")
+    if "/" in q and ("average" in q or "pp&e" in q or "ppe" in q):
+        hit("slash_formula")
+
+    if hits:
+        conf = min(0.98, 0.72 + 0.06 * len(hits))
+        return "calculation", conf, "matched: " + ", ".join(hits)
+    return "direct", 0.88, "no_calculation_heuristics; default_direct"
+
+
+class StyleRoutingText2CypherRetriever(Retriever):
+    """Holds two Text2CypherRetriever instances (direct vs calculation) and routes per search."""
+
+    VERIFY_NEO4J_VERSION = False
+
+    def __init__(
+        self,
+        retriever_direct: Text2CypherRetriever,
+        retriever_calculation: Text2CypherRetriever,
+    ) -> None:
+        super().__init__(
+            retriever_direct.driver,
+            getattr(retriever_direct, "neo4j_database", None),
+        )
+        self._direct = retriever_direct
+        self._calc = retriever_calculation
+
+    def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
+        raise NotImplementedError("StyleRoutingText2CypherRetriever delegates to inner retrievers.")
+
+    def search(self, query_text: str, t2c_style: str = "direct", **kwargs: Any) -> RetrieverResult:
+        inner = self._calc if t2c_style == "calculation" else self._direct
+        return inner.search(query_text=query_text)
 
 
 def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
@@ -874,7 +1076,7 @@ class DualRetriever(Retriever):
         self,
         driver: neo4j.Driver,
         chunk_retriever: HybridCypherRetriever,
-        table_retriever: Text2CypherRetriever,
+        table_retriever: Text2CypherRetriever | StyleRoutingText2CypherRetriever,
         primary_retriever: PrimaryStatementRetriever | None = None,
         neo4j_database: str | None = None,
     ) -> None:
@@ -892,6 +1094,7 @@ class DualRetriever(Retriever):
         top_k: int = 5,
         effective_search_ratio: int = 10,
         query_params: dict[str, Any] | None = None,
+        t2c_style: str = "direct",
     ) -> RetrieverResult:
         chunk_result = self.chunk_retriever.search(
             query_text=query_text,
@@ -899,7 +1102,12 @@ class DualRetriever(Retriever):
             effective_search_ratio=effective_search_ratio,
             query_params=query_params,
         )
-        table_result = self.table_retriever.search(query_text=query_text)
+        if isinstance(self.table_retriever, StyleRoutingText2CypherRetriever):
+            table_result = self.table_retriever.search(
+                query_text=query_text, t2c_style=t2c_style
+            )
+        else:
+            table_result = self.table_retriever.search(query_text=query_text)
         primary_result = (
             self.primary_retriever.search(query_text=query_text, query_params=query_params)
             if self.primary_retriever is not None
@@ -978,9 +1186,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--question-style",
-        choices=["direct", "calculation"],
+        choices=["direct", "calculation", "auto"],
         default="direct",
-        help="Prompt style for direct extraction vs metrics calculation questions.",
+        help=(
+            "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), "
+            "or auto (rule-based classification per question; see question_style_* in output JSON)."
+        ),
     )
     parser.add_argument(
         "--restrict-doc-id",
@@ -1078,17 +1289,27 @@ def main() -> None:
     output_path = Path(args.output)
     results = []
     with neo4j.GraphDatabase.driver(uri, auth=(user, password)) as driver:
-        text2cypher_examples = _select_text2cypher_examples(args.question_style)
+        t2c_direct = Text2CypherRetriever(
+            driver=driver,
+            llm=llm,
+            neo4j_database=database,
+            neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
+            examples=TEXT2CYPHER_EXAMPLES,
+            custom_prompt=TEXT2CYPHER_PROMPT,
+            result_formatter=_format_table_record,
+        )
+        t2c_calculation = Text2CypherRetriever(
+            driver=driver,
+            llm=llm,
+            neo4j_database=database,
+            neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
+            examples=TEXT2CYPHER_EXAMPLES_CALCULATION,
+            custom_prompt=TEXT2CYPHER_PROMPT_CALCULATION,
+            result_formatter=_format_table_record,
+        )
+        table_router = StyleRoutingText2CypherRetriever(t2c_direct, t2c_calculation)
         if args.retriever_mode == "text2cypher":
-            retriever = Text2CypherRetriever(
-                driver=driver,
-                llm=llm,
-                neo4j_database=database,
-                neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
-                examples=text2cypher_examples,
-                custom_prompt=TEXT2CYPHER_PROMPT,
-                result_formatter=_format_table_record,
-            )
+            retriever = table_router
         elif args.retriever_mode == "hybrid":
             retriever = HybridCypherRetriever(
                 driver=driver,
@@ -1109,15 +1330,7 @@ def main() -> None:
                 embedder=embedder,
                 result_formatter=_format_chunk_record,
             )
-            table_retriever = Text2CypherRetriever(
-                driver=driver,
-                llm=llm,
-                neo4j_database=database,
-                neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
-                examples=text2cypher_examples,
-                custom_prompt=TEXT2CYPHER_PROMPT,
-                result_formatter=_format_table_record,
-            )
+            table_retriever = table_router
             primary_retriever = PrimaryStatementRetriever(
                 driver=driver,
                 neo4j_database=database,
@@ -1147,6 +1360,20 @@ def main() -> None:
 
         for idx, row in enumerate(questions, start=1):
             question_text = row["question"]
+            if args.question_style == "auto":
+                effective_style, q_style_conf, q_style_reason = _classify_question_style_auto(
+                    question_text
+                )
+            else:
+                effective_style = args.question_style
+                q_style_conf = 1.0
+                q_style_reason = "cli_fixed"
+            style_fields = {
+                "question_style_mode": args.question_style,
+                "question_style": effective_style,
+                "question_style_confidence": round(float(q_style_conf), 4),
+                "question_style_reason": q_style_reason,
+            }
             print(
                 f"[{idx}/{len(questions)}] {row['doc_id']} :: {row['question_id']}",
                 flush=True,
@@ -1156,8 +1383,9 @@ def main() -> None:
                 search_kwargs = {
                     "query_text": question_text,
                     "return_context": True,
-                    "examples": _build_answer_guidance(row["question"], args.question_style),
+                    "examples": _build_answer_guidance(row["question"], effective_style),
                 }
+                retriever_config: dict[str, Any] = {}
                 if args.retriever_mode in {"hybrid", "dual"}:
                     retriever_config = {
                         "top_k": args.top_k,
@@ -1166,6 +1394,11 @@ def main() -> None:
                             "doc_id": row["doc_id"] if args.restrict_doc_id else None
                         },
                     }
+                if args.retriever_mode == "dual":
+                    retriever_config["t2c_style"] = effective_style
+                elif args.retriever_mode == "text2cypher":
+                    retriever_config["t2c_style"] = effective_style
+                if retriever_config:
                     search_kwargs["retriever_config"] = retriever_config
 
                 result = rag.search(**search_kwargs)
@@ -1189,6 +1422,7 @@ def main() -> None:
                         ),
                         "time_seconds": elapsed,
                         "error": None,
+                        **style_fields,
                     }
                 )
                 _save_results(output_path, results)
@@ -1208,6 +1442,7 @@ def main() -> None:
                         "retriever_result": None,
                         "time_seconds": elapsed,
                         "error": str(exc),
+                        **style_fields,
                     }
                 )
                 _save_results(output_path, results)
