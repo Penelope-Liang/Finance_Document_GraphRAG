@@ -22,8 +22,9 @@ import re
 
 # Lucene query parser special characters (must be escaped with backslash)
 # Order: backslash first, then two-char operators, then single chars
+# `/` is included because Lucene 8+ treats it as the regex query delimiter.
 _LUCENE_ESCAPE_PATTERN = re.compile(
-    r"(\\|&&|\|\||[+\-!(){}\[\]^\"~*?:])"
+    r"(\\|&&|\|\||[+\-!(){}\[\]^\"~*?:/])"
 )
 
 
