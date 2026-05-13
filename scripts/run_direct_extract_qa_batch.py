@@ -464,6 +464,179 @@ def _classify_question_style_auto(question: str) -> tuple[str, float, str]:
     return "direct", 0.88, "no_calculation_heuristics; default_direct"
 
 
+_DOC_PREFIX_TO_COMPANY_NAME = {
+    "ACTIVISIONBLIZZARD": "Activision Blizzard",
+    "ADOBE": "Adobe",
+    "AES": "AES",
+    "AMAZON": "Amazon",
+    "AMCOR": "Amcor",
+    "AMD": "AMD",
+    "AMERICANWATERWORKS": "American Water Works",
+    "BESTBUY": "Best Buy",
+    "BLOCK": "Block",
+    "BOEING": "Boeing",
+    "COCACOLA": "Coca-Cola",
+    "CORNING": "Corning",
+    "COSTCO": "Costco",
+    "CVSHEALTH": "CVS Health",
+    "GENERALMILLS": "General Mills",
+    "KRAFTHEINZ": "Kraft Heinz",
+    "LOCKHEEDMARTIN": "Lockheed Martin",
+    "MGMRESORTS": "MGM Resorts",
+    "MICROSOFT": "Microsoft",
+    "NETFLIX": "Netflix",
+    "NIKE": "Nike",
+    "PEPSICO": "PepsiCo",
+    "WALMART": "Walmart",
+    "3M": "3M",
+}
+
+
+def _company_name_from_doc_name(doc_name: str | None) -> str | None:
+    if not doc_name:
+        return None
+    stem = Path(str(doc_name)).stem.upper()
+    prefix = re.sub(r"_(?:19|20)\d{2}_.*$", "", stem)
+    return _DOC_PREFIX_TO_COMPANY_NAME.get(prefix)
+
+
+def _extract_year_window(question: str) -> list[str]:
+    clean = _normalize_text(question)
+    years = sorted(set(re.findall(r"\b(?:fy)?((?:19|20)\d{2})\b", clean)))
+    if not years:
+        return []
+    numeric_years = sorted(int(year) for year in years)
+    # FinanceBench_RAG uses a small year window.  Include adjacent years because
+    # average-balance and YoY formulas often need the prior period.
+    needs_prior = any(
+        token in clean
+        for token in ("average", "year-over-year", "year over year", "yoy", "growth")
+    )
+    start = (
+        min(numeric_years)
+        if len(numeric_years) > 1 or not needs_prior
+        else max(1900, min(numeric_years) - 1)
+    )
+    end = max(numeric_years)
+    return [str(year) for year in range(start, end + 1)]
+
+
+def _rewrite_metrics_query_for_retrieval(
+    question: str,
+    *,
+    question_style: str,
+    doc_name: str | None = None,
+) -> dict[str, Any]:
+    """FinanceBench_RAG-style retrieval rewrite.
+
+    Keep the user-facing question unchanged, but rewrite derived metric wording
+    into reported financial statement components for retrieval.
+    """
+    company = _company_name_from_doc_name(doc_name)
+    years = _extract_year_window(question)
+    clean = _normalize_text(question)
+    components: list[str] = []
+    statements: list[str] = []
+    operation = "direct"
+
+    def add_component(value: str) -> None:
+        if value not in components:
+            components.append(value)
+
+    def add_statement(value: str) -> None:
+        if value not in statements:
+            statements.append(value)
+
+    if question_style == "calculation":
+        operation = "calculation"
+        if "fixed asset turnover" in clean:
+            operation = "divide"
+            add_component("consolidated revenue or net revenues")
+            add_component("property and equipment net")
+            add_component("property plant and equipment net")
+            add_statement("consolidated statement of operations")
+            add_statement("consolidated balance sheet")
+        if "operating cash flow ratio" in clean:
+            operation = "divide"
+            add_component("net cash provided by operating activities")
+            add_component("cash from operations")
+            add_component("total current liabilities")
+            add_statement("consolidated statement of cash flows")
+            add_statement("consolidated balance sheet")
+        if "capex" in clean or "capital expenditure" in clean or "capital expenditures" in clean:
+            add_component("capital expenditures")
+            add_component("capital expenditure")
+            add_statement("consolidated statement of cash flows")
+        if "% of revenue" in clean or "percent of revenue" in clean or "percentage of revenue" in clean:
+            operation = "divide_or_average"
+            add_component("consolidated net revenues")
+            add_component("total net revenues")
+            add_component("revenue")
+            add_statement("consolidated statement of operations")
+        if "year-over-year" in clean or "year over year" in clean or "yoy" in clean:
+            operation = "change_ratio"
+        if "operating income" in clean or "income from operations" in clean:
+            add_component("operating income")
+            add_component("income from operations")
+            add_statement("consolidated statement of operations")
+        if "average" in clean:
+            operation = "average" if operation == "calculation" else operation
+        if "net profit margin" in clean:
+            operation = "divide_or_average"
+            add_component("net income")
+            add_component("net earnings")
+            add_component("revenue")
+            add_statement("consolidated statement of operations")
+        if "working capital ratio" in clean or "current ratio" in clean:
+            operation = "divide"
+            add_component("total current assets")
+            add_component("total current liabilities")
+            add_statement("consolidated balance sheet")
+        if "return on assets" in clean or "roa" in clean:
+            operation = "divide"
+            add_component("net income")
+            add_component("total assets")
+            add_statement("consolidated statement of operations")
+            add_statement("consolidated balance sheet")
+        if "ebitda" in clean:
+            add_component("EBITDA")
+            add_component("adjusted EBITDA")
+        if "cogs" in clean or "cost of goods sold" in clean or "cost of sales" in clean:
+            add_component("cost of goods sold")
+            add_component("cost of sales")
+            add_statement("consolidated statement of operations")
+    else:
+        # Direct extraction is already working well; keep its retrieval query close
+        # to the original wording and only prepend stable company/year hints.
+        operation = "information_extraction"
+
+    if not components:
+        # Fall back to the original question if no derived metric was recognized.
+        components.append(question)
+
+    statement_text = "; ".join(statements)
+    component_text = "; ".join(components)
+    year_text = ", ".join(years)
+    parts = []
+    if company:
+        parts.append(company)
+    if year_text:
+        parts.append(f"fiscal years {year_text}")
+    parts.append(component_text)
+    if statement_text:
+        parts.append(statement_text)
+
+    rewritten_query = "; ".join(part for part in parts if part).strip()
+    return {
+        "rewritten_query": rewritten_query or question,
+        "company": company,
+        "years": years,
+        "operation": operation,
+        "components": components,
+        "statements": statements,
+    }
+
+
 class StyleRoutingText2CypherRetriever(Retriever):
     """Holds two Text2CypherRetriever instances (direct vs calculation) and routes per search."""
 
@@ -772,6 +945,7 @@ class LLMJudgeRetriever(Retriever):
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
     text = str(record.get("text") or "").strip()
+    doc_id = str(record.get("doc_id") or "").strip()
     section_name = str(record.get("section_name") or "").strip()
     table_cells = record.get("table_cells") or []
     lines = []
@@ -799,6 +973,7 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
     return RetrieverResultItem(
         content="\n".join(lines),
         metadata={
+            "doc_id": doc_id or None,
             "section_name": section_name or None,
             "similarity_score": record.get("similarity_score"),
             "source": "chunk",
@@ -807,6 +982,7 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
 
 
 def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
+    doc_id = record.get("doc_id")
     section_name = str(record.get("section_name") or "").strip()
     row_header = record.get("row_header")
     col_header = record.get("col_header")
@@ -822,6 +998,7 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
     return RetrieverResultItem(
         content=content,
         metadata={
+            "doc_id": doc_id,
             "section_name": section_name or None,
             "row_header": row_header,
             "col_header": col_header,
@@ -984,6 +1161,7 @@ WITH chunk, match_priority,
          scale: cell.scale
      })[0..40] AS table_cells
 RETURN chunk.text AS text,
+       chunk.doc_id AS doc_id,
        chunk.section_name AS section_name,
        chunk.statement_type AS chunk_statement_type,
        1.0 AS similarity_score,
@@ -1095,21 +1273,23 @@ class DualRetriever(Retriever):
         effective_search_ratio: int = 10,
         query_params: dict[str, Any] | None = None,
         t2c_style: str = "direct",
+        retrieval_query_text: str | None = None,
     ) -> RetrieverResult:
+        search_text = retrieval_query_text or query_text
         chunk_result = self.chunk_retriever.search(
-            query_text=query_text,
+            query_text=search_text,
             top_k=top_k,
             effective_search_ratio=effective_search_ratio,
             query_params=query_params,
         )
         if isinstance(self.table_retriever, StyleRoutingText2CypherRetriever):
             table_result = self.table_retriever.search(
-                query_text=query_text, t2c_style=t2c_style
+                query_text=search_text, t2c_style=t2c_style
             )
         else:
-            table_result = self.table_retriever.search(query_text=query_text)
+            table_result = self.table_retriever.search(query_text=search_text)
         primary_result = (
-            self.primary_retriever.search(query_text=query_text, query_params=query_params)
+            self.primary_retriever.search(query_text=search_text, query_params=query_params)
             if self.primary_retriever is not None
             else RetrieverResult(items=[], metadata={"__retriever": "PrimaryStatementRetriever", "matched": False})
         )
@@ -1125,7 +1305,8 @@ class DualRetriever(Retriever):
             seen_contents.add(content)
             items.append(item)
 
-        items = _attach_fusion_scores(query_text, items)
+        fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
+        items = _attach_fusion_scores(fusion_question, items)
         items.sort(
             key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
             reverse=True,
@@ -1138,6 +1319,7 @@ class DualRetriever(Retriever):
                 "chunk_retriever": chunk_result.metadata,
                 "table_retriever": table_result.metadata,
                 "primary_retriever": primary_result.metadata,
+                "retrieval_query_text": search_text,
                 "fusion": {
                     "strategy": "source_softmax_plus_constraint_bonus",
                     "chunk_weight": 0.5,
@@ -1191,6 +1373,14 @@ def main() -> None:
         help=(
             "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), "
             "or auto (rule-based classification per question; see question_style_* in output JSON)."
+        ),
+    )
+    parser.add_argument(
+        "--use-query-rewrite",
+        action="store_true",
+        help=(
+            "FinanceBench_RAG-style retrieval rewrite: keep the original question for answering, "
+            "but use a retrieval-friendly query with reported components in dual mode."
         ),
     )
     parser.add_argument(
@@ -1280,6 +1470,7 @@ def main() -> None:
              name: coalesce(entity.title, entity.name, elementId(entity))
          }) AS entities
     RETURN chunk.text AS text,
+           chunk.doc_id AS doc_id,
            chunk.section_name AS section_name,
            score AS similarity_score,
            table_cells,
@@ -1374,10 +1565,37 @@ def main() -> None:
                 "question_style_confidence": round(float(q_style_conf), 4),
                 "question_style_reason": q_style_reason,
             }
+            query_rewrite_plan = (
+                _rewrite_metrics_query_for_retrieval(
+                    question_text,
+                    question_style=effective_style,
+                    doc_name=str(row.get("doc_name") or ""),
+                )
+                if args.use_query_rewrite
+                else {
+                    "rewritten_query": question_text,
+                    "company": None,
+                    "years": [],
+                    "operation": "disabled",
+                    "components": [],
+                    "statements": [],
+                }
+            )
+            query_rewrite_fields = {
+                "query_rewrite_applied": bool(args.use_query_rewrite),
+                "retrieval_query": query_rewrite_plan["rewritten_query"],
+                "query_rewrite_company": query_rewrite_plan["company"],
+                "query_rewrite_years": query_rewrite_plan["years"],
+                "query_rewrite_operation": query_rewrite_plan["operation"],
+                "query_rewrite_components": query_rewrite_plan["components"],
+                "query_rewrite_statements": query_rewrite_plan["statements"],
+            }
             print(
                 f"[{idx}/{len(questions)}] {row['doc_id']} :: {row['question_id']}",
                 flush=True,
             )
+            if args.use_query_rewrite:
+                print(f"  retrieval_query={query_rewrite_plan['rewritten_query']}", flush=True)
             start = time.time()
             try:
                 search_kwargs = {
@@ -1396,6 +1614,10 @@ def main() -> None:
                     }
                 if args.retriever_mode == "dual":
                     retriever_config["t2c_style"] = effective_style
+                    if args.use_query_rewrite:
+                        retriever_config["retrieval_query_text"] = query_rewrite_plan[
+                            "rewritten_query"
+                        ]
                 elif args.retriever_mode == "text2cypher":
                     retriever_config["t2c_style"] = effective_style
                 if retriever_config:
@@ -1423,6 +1645,7 @@ def main() -> None:
                         "time_seconds": elapsed,
                         "error": None,
                         **style_fields,
+                        **query_rewrite_fields,
                     }
                 )
                 _save_results(output_path, results)
@@ -1443,6 +1666,7 @@ def main() -> None:
                         "time_seconds": elapsed,
                         "error": str(exc),
                         **style_fields,
+                        **query_rewrite_fields,
                     }
                 )
                 _save_results(output_path, results)
