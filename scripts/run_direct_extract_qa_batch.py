@@ -1435,9 +1435,13 @@ def _is_retryable_llm_error(exc: Exception) -> bool:
         marker in message
         for marker in (
             "unsupported value: nan",
+            "json: unsupported value",
             "status code: 500",
             "failed to encode response",
             "internal server error",
+            "connection reset",
+            "broken pipe",
+            "timeout",
         )
     )
 
@@ -1449,6 +1453,8 @@ def _rag_search_with_retry(
     retry_sleep: float,
     **search_kwargs: Any,
 ) -> Any:
+    """Retry whole RAG search (retrieval + answer LLM). Ollama sometimes returns 500
+    ``json: unsupported value: NaN`` on flaky GPU runs; extra attempts often succeed."""
     attempt = 0
     while True:
         try:
@@ -1459,7 +1465,10 @@ def _rag_search_with_retry(
             attempt += 1
             print(f"  retryable LLM error ({attempt}/{max_retries}): {exc}", flush=True)
             if retry_sleep > 0:
-                time.sleep(retry_sleep)
+                # Longer backoff for NaN/encode failures (often need GPU to settle).
+                msg = str(exc).lower()
+                mult = 2.0 if ("nan" in msg or "encode" in msg) else 1.0
+                time.sleep(retry_sleep * mult * attempt)
 
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
@@ -1979,14 +1988,17 @@ def main() -> None:
     parser.add_argument(
         "--llm-retries",
         type=int,
-        default=2,
-        help="Retries for transient Ollama generation errors such as NaN/status 500.",
+        default=6,
+        help=(
+            "Max retry rounds after a failed rag.search for transient Ollama errors "
+            "(e.g. json: unsupported value: NaN / status 500). Each round retries the full search."
+        ),
     )
     parser.add_argument(
         "--llm-retry-sleep",
         type=float,
-        default=1.0,
-        help="Seconds to sleep between retryable LLM errors.",
+        default=1.5,
+        help="Base seconds between retryable LLM errors (scaled by attempt; NaN/encode errors wait longer).",
     )
     args = parser.parse_args()
 
