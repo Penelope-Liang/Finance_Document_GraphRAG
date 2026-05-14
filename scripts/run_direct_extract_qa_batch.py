@@ -637,6 +637,394 @@ def _rewrite_metrics_query_for_retrieval(
     }
 
 
+_METRICS_TABLE_TARGETS = {
+    "revenue": {
+        "aliases": (
+            "total consolidated net revenues",
+            "total consolidated revenues",
+            "total net revenues",
+            "total net revenue",
+            "total revenues",
+            "total revenue",
+            "net revenues",
+            "net revenue",
+            "net sales",
+            "revenue",
+            "revenues",
+        ),
+        "section_hints": (
+            "statement of operations",
+            "statements of operations",
+            "statement of income",
+            "statements of income",
+            "statement of earnings",
+            "income statement",
+            "segment",
+        ),
+    },
+    "ppne": {
+        "aliases": (
+            "property and equipment, net",
+            "property, plant and equipment, net",
+            "property plant and equipment net",
+            "property and equipment",
+            "property, plant and equipment",
+            "net property, plant and equipment",
+            "net pp&e",
+            "pp&e",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "operating_cash_flow": {
+        "aliases": (
+            "net cash provided by operating activities",
+            "net cash provided by operations",
+            "cash provided by operating activities",
+            "cash flow from operating activities",
+            "cash flows from operating activities",
+            "cash from operations",
+            "net cash from operating activities",
+        ),
+        "section_hints": (
+            "cash flow",
+            "cash flows",
+            "liquidity and capital resources",
+        ),
+    },
+    "current_liabilities": {
+        "aliases": (
+            "total current liabilities",
+            "current liabilities",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "current_assets": {
+        "aliases": (
+            "total current assets",
+            "current assets",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "total_assets": {
+        "aliases": (
+            "total assets",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "capex": {
+        "aliases": (
+            "capital expenditures",
+            "capital expenditure",
+            "capital spending",
+            "purchases of property, plant and equipment",
+            "purchases of property and equipment",
+            "additions to property and equipment",
+        ),
+        "section_hints": (
+            "cash flow",
+            "cash flows",
+            "liquidity and capital resources",
+        ),
+    },
+    "operating_income": {
+        "aliases": (
+            "operating income",
+            "income from operations",
+            "operating profit",
+        ),
+        "section_hints": (
+            "statement of operations",
+            "statements of operations",
+            "statement of income",
+            "statements of income",
+            "income statement",
+        ),
+    },
+    "net_income": {
+        "aliases": (
+            "net income attributable to shareholders",
+            "net income attributable to common shareholders",
+            "net income attributable to common stockholders",
+            "net income",
+            "net earnings",
+        ),
+        "section_hints": (
+            "statement of operations",
+            "statements of operations",
+            "statement of income",
+            "statements of income",
+            "income statement",
+        ),
+    },
+    "cogs": {
+        "aliases": (
+            "cost of goods sold",
+            "cost of sales",
+            "cost of revenue",
+            "cost of revenues",
+            "cost of products sold",
+        ),
+        "section_hints": (
+            "statement of operations",
+            "statements of operations",
+            "statement of income",
+            "statements of income",
+            "income statement",
+        ),
+    },
+    "inventory": {
+        "aliases": (
+            "inventories",
+            "inventory",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "accounts_payable": {
+        "aliases": (
+            "accounts payable",
+            "accounts payable and accrued expenses",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "accounts_receivable": {
+        "aliases": (
+            "accounts receivable",
+            "accounts receivable, net",
+            "trade accounts receivable",
+        ),
+        "section_hints": (
+            "balance sheet",
+            "balance sheets",
+            "financial position",
+        ),
+    },
+    "dividends_paid": {
+        "aliases": (
+            "cash dividends paid",
+            "dividends paid",
+            "dividends",
+        ),
+        "section_hints": (
+            "cash flow",
+            "cash flows",
+        ),
+    },
+    "depreciation_amortization": {
+        "aliases": (
+            "depreciation and amortization",
+            "depreciation & amortization",
+            "depreciation",
+        ),
+        "section_hints": (
+            "cash flow",
+            "cash flows",
+        ),
+    },
+}
+
+
+def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> list[str]:
+    clean = _normalize_text(question)
+    targets: list[str] = []
+
+    def add(name: str) -> None:
+        if name not in targets:
+            targets.append(name)
+
+    if "fixed asset turnover" in clean:
+        add("revenue")
+        add("ppne")
+    if "operating cash flow ratio" in clean:
+        add("operating_cash_flow")
+        add("current_liabilities")
+    if "capex" in clean or "capital expenditure" in clean or "capital expenditures" in clean:
+        add("capex")
+    if "% of revenue" in clean or "percent of revenue" in clean or "percentage of revenue" in clean:
+        add("revenue")
+    if "revenue growth" in clean or "change in revenue" in clean or "revenue cagr" in clean:
+        add("revenue")
+    if "operating income" in clean or "income from operations" in clean:
+        add("operating_income")
+    if "working capital ratio" in clean or "current ratio" in clean:
+        add("current_assets")
+        add("current_liabilities")
+    if "net working capital" in clean:
+        add("current_assets")
+        add("current_liabilities")
+    if "return on assets" in clean or "roa" in clean:
+        add("net_income")
+        add("total_assets")
+    if "net profit margin" in clean:
+        add("net_income")
+        add("revenue")
+    if "inventory turnover" in clean:
+        add("cogs")
+        add("inventory")
+    if "dpo" in clean or "days payable outstanding" in clean:
+        add("accounts_payable")
+        add("cogs")
+        add("inventory")
+    if "ccc" in clean or "cash conversion cycle" in clean:
+        add("inventory")
+        add("accounts_receivable")
+        add("accounts_payable")
+        add("cogs")
+        add("revenue")
+    if "dividend payout" in clean or "retention ratio" in clean:
+        add("dividends_paid")
+        add("net_income")
+    if "ebitda" in clean:
+        add("operating_income")
+        add("depreciation_amortization")
+    if "free cash flow" in clean or "fcf" in clean:
+        add("operating_cash_flow")
+        add("capex")
+
+    # Fall back to query-rewriter components if no explicit formula pattern fired.
+    if not targets and plan:
+        component_text = _normalize_text(" ".join(str(c) for c in plan.get("components") or []))
+        for name, spec in _METRICS_TABLE_TARGETS.items():
+            if any(alias in component_text for alias in spec["aliases"]):
+                add(name)
+    return targets
+
+
+_METRICS_TABLE_CELL_QUERY = """
+UNWIND $targets AS target
+MATCH (ch:Chunk {doc_id: $doc_id})-[:HAS_TABLE]->(t:Table)-[:HAS_CELL]->(cell:TableCell)
+WITH target, ch, t, cell,
+     toLower(coalesce(cell.row_header, "")) AS row_text,
+     toLower(coalesce(cell.col_header, "")) AS col_text,
+     toLower(coalesce(t.section_name, ch.section_name, "")) AS section_text
+WHERE any(alias IN target.aliases WHERE row_text CONTAINS alias)
+  AND ($years = [] OR any(year IN $years WHERE col_text CONTAINS year))
+WITH target, ch, t, cell, row_text, col_text, section_text,
+     CASE WHEN any(hint IN target.section_hints WHERE section_text CONTAINS hint) THEN 1 ELSE 0 END AS section_hit,
+     CASE
+       WHEN row_text IN target.aliases THEN 2
+       WHEN any(alias IN target.aliases WHERE row_text CONTAINS alias) THEN 1
+       ELSE 0
+     END AS row_hit,
+     CASE WHEN $years = [] OR any(year IN $years WHERE col_text CONTAINS year) THEN 1 ELSE 0 END AS year_hit
+RETURN target.name AS target_name,
+       ch.doc_id AS doc_id,
+       t.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale,
+       section_hit,
+       row_hit,
+       year_hit
+ORDER BY section_hit DESC, row_hit DESC, year_hit DESC, target_name, col_header DESC
+LIMIT $limit
+"""
+
+
+class MetricsTableCellRetriever(Retriever):
+    VERIFY_NEO4J_VERSION = False
+
+    def __init__(
+        self,
+        driver: neo4j.Driver,
+        neo4j_database: str | None = None,
+        limit: int = 80,
+    ) -> None:
+        super().__init__(driver, neo4j_database)
+        self.limit = limit
+
+    def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
+        raise NotImplementedError("MetricsTableCellRetriever uses a custom search implementation.")
+
+    def search(
+        self,
+        query_text: str,
+        doc_id: str | None = None,
+        years: list[str] | None = None,
+        plan: dict[str, Any] | None = None,
+    ) -> RetrieverResult:
+        target_names = _metrics_component_targets(query_text, plan)
+        if not doc_id or not target_names:
+            return RetrieverResult(
+                items=[],
+                metadata={
+                    "__retriever": "MetricsTableCellRetriever",
+                    "matched": False,
+                    "reason": "missing doc_id or targets",
+                    "doc_id": doc_id,
+                    "target_names": target_names,
+                },
+            )
+
+        targets = [
+            {
+                "name": name,
+                "aliases": list(_METRICS_TABLE_TARGETS[name]["aliases"]),
+                "section_hints": list(_METRICS_TABLE_TARGETS[name]["section_hints"]),
+            }
+            for name in target_names
+            if name in _METRICS_TABLE_TARGETS
+        ]
+        params = {
+            "doc_id": doc_id,
+            "years": list(years or []),
+            "targets": targets,
+            "limit": self.limit,
+        }
+        with self.driver.session(database=self.neo4j_database) as session:
+            records = list(session.run(_METRICS_TABLE_CELL_QUERY, params))
+
+        items: list[RetrieverResultItem] = []
+        for record in records:
+            item = _format_table_record(record)
+            metadata = dict(item.metadata or {})
+            metadata["source"] = "metrics_table"
+            metadata["target_name"] = record.get("target_name")
+            metadata["section_hit"] = int(record.get("section_hit") or 0)
+            metadata["row_hit"] = int(record.get("row_hit") or 0)
+            metadata["year_hit"] = int(record.get("year_hit") or 0)
+            content = f"Metric target: {record.get('target_name')}\n{item.content}"
+            items.append(RetrieverResultItem(content=content, metadata=metadata))
+
+        return RetrieverResult(
+            items=items,
+            metadata={
+                "__retriever": "MetricsTableCellRetriever",
+                "matched": bool(items),
+                "doc_id": doc_id,
+                "years": list(years or []),
+                "target_names": target_names,
+                "kept": len(items),
+            },
+        )
+
+
 class StyleRoutingText2CypherRetriever(Retriever):
     """Holds two Text2CypherRetriever instances (direct vs calculation) and routes per search."""
 
@@ -739,6 +1127,13 @@ def _item_base_score(item: RetrieverResultItem) -> float:
         return _safe_float(metadata.get("similarity_score"))
     if source == "table":
         return _table_base_score(item)
+    if source == "metrics_table":
+        return (
+            _table_base_score(item)
+            + 1.5 * int(metadata.get("section_hit") or 0)
+            + 1.0 * int(metadata.get("row_hit") or 0)
+            + 0.8 * int(metadata.get("year_hit") or 0)
+        )
     if source == "primary_statement":
         # Primary statements are deterministically matched, all are equally relevant
         # to the question's statement-type hint, so give them a uniform high base.
@@ -789,6 +1184,8 @@ def _attach_fusion_scores(
             source_weight = chunk_weight
         elif source == "table":
             source_weight = table_weight
+        elif source == "metrics_table":
+            source_weight = 2.2
         elif source == "primary_statement":
             # Differentiated weight by match_priority:
             #   3 = both statement_type and section_name match (strongest signal)
@@ -1256,12 +1653,14 @@ class DualRetriever(Retriever):
         chunk_retriever: HybridCypherRetriever,
         table_retriever: Text2CypherRetriever | StyleRoutingText2CypherRetriever,
         primary_retriever: PrimaryStatementRetriever | None = None,
+        metrics_retriever: MetricsTableCellRetriever | None = None,
         neo4j_database: str | None = None,
     ) -> None:
         super().__init__(driver, neo4j_database)
         self.chunk_retriever = chunk_retriever
         self.table_retriever = table_retriever
         self.primary_retriever = primary_retriever
+        self.metrics_retriever = metrics_retriever
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
         raise NotImplementedError("DualRetriever uses a custom search implementation.")
@@ -1274,8 +1673,22 @@ class DualRetriever(Retriever):
         query_params: dict[str, Any] | None = None,
         t2c_style: str = "direct",
         retrieval_query_text: str | None = None,
+        metrics_doc_id: str | None = None,
+        metrics_plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         search_text = retrieval_query_text or query_text
+        metrics_result = (
+            self.metrics_retriever.search(
+                query_text=query_text,
+                doc_id=metrics_doc_id,
+                years=list((metrics_plan or {}).get("years") or []),
+                plan=metrics_plan,
+            )
+            if self.metrics_retriever is not None
+            and t2c_style == "calculation"
+            and metrics_plan is not None
+            else RetrieverResult(items=[], metadata={"__retriever": "MetricsTableCellRetriever", "matched": False})
+        )
         chunk_result = self.chunk_retriever.search(
             query_text=search_text,
             top_k=top_k,
@@ -1297,8 +1710,9 @@ class DualRetriever(Retriever):
         items: list[RetrieverResultItem] = []
         seen_contents: set[str] = set()
 
-        # Order matters: primary statements first so they win ties on dedup.
-        for item in primary_result.items + table_result.items + chunk_result.items:
+        # Order matters: structured metric cells first, then primary statements,
+        # so deterministic evidence wins ties on dedup before semantic retrieval.
+        for item in metrics_result.items + primary_result.items + table_result.items + chunk_result.items:
             content = str(item.content)
             if content in seen_contents:
                 continue
@@ -1316,6 +1730,7 @@ class DualRetriever(Retriever):
             items=items,
             metadata={
                 "__retriever": "DualRetriever",
+                "metrics_retriever": metrics_result.metadata,
                 "chunk_retriever": chunk_result.metadata,
                 "table_retriever": table_result.metadata,
                 "primary_retriever": primary_result.metadata,
@@ -1526,11 +1941,16 @@ def main() -> None:
                 driver=driver,
                 neo4j_database=database,
             )
+            metrics_retriever = MetricsTableCellRetriever(
+                driver=driver,
+                neo4j_database=database,
+            )
             retriever = DualRetriever(
                 driver=driver,
                 chunk_retriever=chunk_retriever,
                 table_retriever=table_retriever,
                 primary_retriever=primary_retriever,
+                metrics_retriever=metrics_retriever,
                 neo4j_database=database,
             )
         if args.use_reranker:
@@ -1618,6 +2038,9 @@ def main() -> None:
                         retriever_config["retrieval_query_text"] = query_rewrite_plan[
                             "rewritten_query"
                         ]
+                        if effective_style == "calculation":
+                            retriever_config["metrics_doc_id"] = row["doc_id"]
+                            retriever_config["metrics_plan"] = query_rewrite_plan
                 elif args.retriever_mode == "text2cypher":
                     retriever_config["t2c_style"] = effective_style
                 if retriever_config:
