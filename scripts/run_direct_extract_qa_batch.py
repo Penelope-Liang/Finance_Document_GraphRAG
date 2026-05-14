@@ -915,12 +915,13 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
 
 _METRICS_TABLE_CELL_QUERY = """
 UNWIND $targets AS target
-MATCH (ch:Chunk {doc_id: $doc_id})-[:HAS_TABLE]->(t:Table)-[:HAS_CELL]->(cell:TableCell)
+MATCH (ch:Chunk)-[:HAS_TABLE]->(t:Table)-[:HAS_CELL]->(cell:TableCell)
 WITH target, ch, t, cell,
      toLower(coalesce(cell.row_header, "")) AS row_text,
      toLower(coalesce(cell.col_header, "")) AS col_text,
      toLower(coalesce(t.section_name, ch.section_name, "")) AS section_text
-WHERE any(alias IN target.aliases WHERE row_text CONTAINS alias)
+WHERE ($doc_id IS NULL OR ch.doc_id = $doc_id)
+  AND any(alias IN target.aliases WHERE row_text CONTAINS alias)
   AND ($years = [] OR any(year IN $years WHERE col_text CONTAINS year))
 WITH target, ch, t, cell, row_text, col_text, section_text,
      CASE WHEN any(hint IN target.section_hints WHERE section_text CONTAINS hint) THEN 1 ELSE 0 END AS section_hit,
@@ -970,13 +971,13 @@ class MetricsTableCellRetriever(Retriever):
         plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         target_names = _metrics_component_targets(query_text, plan)
-        if not doc_id or not target_names:
+        if not target_names:
             return RetrieverResult(
                 items=[],
                 metadata={
                     "__retriever": "MetricsTableCellRetriever",
                     "matched": False,
-                    "reason": "missing doc_id or targets",
+                    "reason": "missing targets",
                     "doc_id": doc_id,
                     "target_names": target_names,
                 },
@@ -1018,6 +1019,7 @@ class MetricsTableCellRetriever(Retriever):
                 "__retriever": "MetricsTableCellRetriever",
                 "matched": bool(items),
                 "doc_id": doc_id,
+                "doc_id_filter_applied": bool(doc_id),
                 "years": list(years or []),
                 "target_names": target_names,
                 "kept": len(items),
@@ -1338,6 +1340,39 @@ class LLMJudgeRetriever(Retriever):
                 items=result.items,
                 metadata={**(result.metadata or {}), "llm_judge_applied": False},
             )
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "unsupported value: nan",
+            "status code: 500",
+            "failed to encode response",
+            "internal server error",
+        )
+    )
+
+
+def _rag_search_with_retry(
+    rag: GraphRAG,
+    *,
+    max_retries: int,
+    retry_sleep: float,
+    **search_kwargs: Any,
+) -> Any:
+    attempt = 0
+    while True:
+        try:
+            return rag.search(**search_kwargs)
+        except Exception as exc:
+            if attempt >= max_retries or not _is_retryable_llm_error(exc):
+                raise
+            attempt += 1
+            print(f"  retryable LLM error ({attempt}/{max_retries}): {exc}", flush=True)
+            if retry_sleep > 0:
+                time.sleep(retry_sleep)
 
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
@@ -1799,6 +1834,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--metrics-table-no-doc-id",
+        action="store_true",
+        help=(
+            "Experiment only: do not restrict the deterministic metrics TableCell retriever "
+            "to the question's doc_id. Hybrid retrieval is unaffected."
+        ),
+    )
+    parser.add_argument(
         "--restrict-doc-id",
         action="store_true",
         help="Diagnostic mode: restrict hybrid evidence to the target doc_id.",
@@ -1834,6 +1877,18 @@ def main() -> None:
         "--llm-judge-model",
         default=os.environ.get("OLLAMA_JUDGE_MODEL", "qwen3:14b"),
         help="Ollama model used only for evidence judging.",
+    )
+    parser.add_argument(
+        "--llm-retries",
+        type=int,
+        default=2,
+        help="Retries for transient Ollama generation errors such as NaN/status 500.",
+    )
+    parser.add_argument(
+        "--llm-retry-sleep",
+        type=float,
+        default=1.0,
+        help="Seconds to sleep between retryable LLM errors.",
     )
     args = parser.parse_args()
 
@@ -2039,14 +2094,21 @@ def main() -> None:
                             "rewritten_query"
                         ]
                         if effective_style == "calculation":
-                            retriever_config["metrics_doc_id"] = row["doc_id"]
+                            retriever_config["metrics_doc_id"] = (
+                                None if args.metrics_table_no_doc_id else row["doc_id"]
+                            )
                             retriever_config["metrics_plan"] = query_rewrite_plan
                 elif args.retriever_mode == "text2cypher":
                     retriever_config["t2c_style"] = effective_style
                 if retriever_config:
                     search_kwargs["retriever_config"] = retriever_config
 
-                result = rag.search(**search_kwargs)
+                result = _rag_search_with_retry(
+                    rag,
+                    max_retries=args.llm_retries,
+                    retry_sleep=args.llm_retry_sleep,
+                    **search_kwargs,
+                )
                 raw_answer = result.answer
                 answer, evidence = _parse_answer(raw_answer)
                 elapsed = round(time.time() - start, 2)
