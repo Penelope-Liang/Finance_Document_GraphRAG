@@ -500,6 +500,63 @@ def _company_name_from_doc_name(doc_name: str | None) -> str | None:
     return _DOC_PREFIX_TO_COMPANY_NAME.get(prefix)
 
 
+_QUESTION_COMPANY_ALIASES = {
+    "ACTIVISIONBLIZZARD": ("activision blizzard", "activision"),
+    "ADOBE": ("adobe", "adobe systems"),
+    "AES": ("aes",),
+    "AMAZON": ("amazon",),
+    "AMCOR": ("amcor",),
+    "AMD": ("amd", "advanced micro devices"),
+    "AMERICANWATERWORKS": ("american water works",),
+    "BESTBUY": ("best buy",),
+    "BLOCK": ("block", "square"),
+    "BOEING": ("boeing",),
+    "COCACOLA": ("coca cola", "coca-cola", "coke"),
+    "CORNING": ("corning",),
+    "COSTCO": ("costco",),
+    "CVSHEALTH": ("cvs health", "cvs"),
+    "GENERALMILLS": ("general mills",),
+    "KRAFTHEINZ": ("kraft heinz", "kraft-heinz"),
+    "LOCKHEEDMARTIN": ("lockheed martin",),
+    "MGMRESORTS": ("mgm resorts", "mgm"),
+    "MICROSOFT": ("microsoft",),
+    "NETFLIX": ("netflix",),
+    "NIKE": ("nike",),
+    "PEPSICO": ("pepsico", "pepsi"),
+    "WALMART": ("walmart", "wal-mart"),
+    "3M": ("3m",),
+}
+
+
+def _company_name_from_question(question: str | None) -> str | None:
+    if not question:
+        return None
+    clean = _normalize_text(question).replace("'s", "")
+    padded = f" {clean} "
+    matches: list[tuple[int, str]] = []
+    for prefix, aliases in _QUESTION_COMPANY_ALIASES.items():
+        for alias in aliases:
+            normalized_alias = _normalize_text(alias).replace("'s", "")
+            if f" {normalized_alias} " in padded:
+                matches.append((len(normalized_alias), prefix))
+    if not matches:
+        return None
+    # Prefer the longest alias, e.g. "american water works" over "water".
+    _, prefix = max(matches)
+    return _DOC_PREFIX_TO_COMPANY_NAME.get(prefix)
+
+
+def _company_doc_key_from_company_name(company: str | None) -> str | None:
+    if not company:
+        return None
+    normalized_company = _normalize_text(company).replace("-", "").replace(" ", "")
+    for prefix, name in _DOC_PREFIX_TO_COMPANY_NAME.items():
+        normalized_name = _normalize_text(name).replace("-", "").replace(" ", "")
+        if normalized_name == normalized_company:
+            return prefix.lower()
+    return None
+
+
 def _extract_year_window(question: str) -> list[str]:
     clean = _normalize_text(question)
     years = sorted(set(re.findall(r"\b(?:fy)?((?:19|20)\d{2})\b", clean)))
@@ -532,7 +589,9 @@ def _rewrite_metrics_query_for_retrieval(
     Keep the user-facing question unchanged, but rewrite derived metric wording
     into reported financial statement components for retrieval.
     """
-    company = _company_name_from_doc_name(doc_name)
+    company_from_question = _company_name_from_question(question)
+    company_from_doc = _company_name_from_doc_name(doc_name)
+    company = company_from_question or company_from_doc
     years = _extract_year_window(question)
     clean = _normalize_text(question)
     components: list[str] = []
@@ -630,6 +689,8 @@ def _rewrite_metrics_query_for_retrieval(
     return {
         "rewritten_query": rewritten_query or question,
         "company": company,
+        "company_source": "question" if company_from_question else ("doc_name" if company_from_doc else None),
+        "company_doc_key": _company_doc_key_from_company_name(company),
         "years": years,
         "operation": operation,
         "components": components,
@@ -915,35 +976,53 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
 
 _METRICS_TABLE_CELL_QUERY = """
 UNWIND $targets AS target
-MATCH (ch:Chunk)-[:HAS_TABLE]->(t:Table)-[:HAS_CELL]->(cell:TableCell)
-WITH target, ch, t, cell,
-     toLower(coalesce(cell.row_header, "")) AS row_text,
-     toLower(coalesce(cell.col_header, "")) AS col_text,
-     toLower(coalesce(t.section_name, ch.section_name, "")) AS section_text
-WHERE ($doc_id IS NULL OR ch.doc_id = $doc_id)
-  AND any(alias IN target.aliases WHERE row_text CONTAINS alias)
-  AND ($years = [] OR any(year IN $years WHERE col_text CONTAINS year))
-WITH target, ch, t, cell, row_text, col_text, section_text,
-     CASE WHEN any(hint IN target.section_hints WHERE section_text CONTAINS hint) THEN 1 ELSE 0 END AS section_hit,
-     CASE
-       WHEN row_text IN target.aliases THEN 2
-       WHEN any(alias IN target.aliases WHERE row_text CONTAINS alias) THEN 1
-       ELSE 0
-     END AS row_hit,
-     CASE WHEN $years = [] OR any(year IN $years WHERE col_text CONTAINS year) THEN 1 ELSE 0 END AS year_hit
-RETURN target.name AS target_name,
-       ch.doc_id AS doc_id,
-       t.section_name AS section_name,
-       cell.row_header AS row_header,
-       cell.col_header AS col_header,
-       cell.text AS text,
-       cell.numeric_value AS numeric_value,
-       cell.numeric_kind AS numeric_kind,
-       cell.scale AS scale,
+CALL {
+    WITH target
+    MATCH (ch:Chunk)-[:HAS_TABLE]->(t:Table)-[:HAS_CELL]->(cell:TableCell)
+    WITH target, ch, t, cell,
+         toLower(coalesce(cell.row_header, "")) AS row_text,
+         toLower(coalesce(cell.col_header, "")) AS col_text,
+         toLower(coalesce(t.section_name, ch.section_name, "")) AS section_text
+    WHERE ($doc_id IS NULL OR ch.doc_id = $doc_id)
+      AND ($company_doc_key IS NULL OR toLower(ch.doc_id) STARTS WITH $company_doc_key)
+      AND any(alias IN target.aliases WHERE row_text CONTAINS alias)
+      AND ($years = [] OR any(year IN $years WHERE col_text CONTAINS year))
+    WITH target, ch, t, cell, row_text, col_text, section_text,
+         CASE WHEN any(hint IN target.section_hints WHERE section_text CONTAINS hint) THEN 1 ELSE 0 END AS section_hit,
+         CASE
+           WHEN row_text IN target.aliases THEN 2
+           WHEN any(alias IN target.aliases WHERE row_text CONTAINS alias) THEN 1
+           ELSE 0
+         END AS row_hit,
+         CASE WHEN $years = [] OR any(year IN $years WHERE col_text CONTAINS year) THEN 1 ELSE 0 END AS year_hit
+    RETURN target.name AS target_name,
+           ch.doc_id AS doc_id,
+           t.section_name AS section_name,
+           cell.row_header AS row_header,
+           cell.col_header AS col_header,
+           cell.text AS text,
+           cell.numeric_value AS numeric_value,
+           cell.numeric_kind AS numeric_kind,
+           cell.scale AS scale,
+           section_hit,
+           row_hit,
+           year_hit
+    ORDER BY section_hit DESC, row_hit DESC, year_hit DESC, col_header DESC
+    LIMIT $per_target_limit
+}
+RETURN target_name,
+       doc_id,
+       section_name,
+       row_header,
+       col_header,
+       text,
+       numeric_value,
+       numeric_kind,
+       scale,
        section_hit,
        row_hit,
        year_hit
-ORDER BY section_hit DESC, row_hit DESC, year_hit DESC, target_name, col_header DESC
+ORDER BY target_name, section_hit DESC, row_hit DESC, year_hit DESC, col_header DESC
 LIMIT $limit
 """
 
@@ -956,9 +1035,11 @@ class MetricsTableCellRetriever(Retriever):
         driver: neo4j.Driver,
         neo4j_database: str | None = None,
         limit: int = 80,
+        per_target_limit: int = 12,
     ) -> None:
         super().__init__(driver, neo4j_database)
         self.limit = limit
+        self.per_target_limit = per_target_limit
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
         raise NotImplementedError("MetricsTableCellRetriever uses a custom search implementation.")
@@ -967,6 +1048,7 @@ class MetricsTableCellRetriever(Retriever):
         self,
         query_text: str,
         doc_id: str | None = None,
+        company_doc_key: str | None = None,
         years: list[str] | None = None,
         plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
@@ -979,6 +1061,7 @@ class MetricsTableCellRetriever(Retriever):
                     "matched": False,
                     "reason": "missing targets",
                     "doc_id": doc_id,
+                    "company_doc_key": company_doc_key,
                     "target_names": target_names,
                 },
             )
@@ -994,9 +1077,11 @@ class MetricsTableCellRetriever(Retriever):
         ]
         params = {
             "doc_id": doc_id,
+            "company_doc_key": company_doc_key,
             "years": list(years or []),
             "targets": targets,
             "limit": self.limit,
+            "per_target_limit": self.per_target_limit,
         }
         with self.driver.session(database=self.neo4j_database) as session:
             records = list(session.run(_METRICS_TABLE_CELL_QUERY, params))
@@ -1020,6 +1105,8 @@ class MetricsTableCellRetriever(Retriever):
                 "matched": bool(items),
                 "doc_id": doc_id,
                 "doc_id_filter_applied": bool(doc_id),
+                "company_doc_key": company_doc_key,
+                "company_filter_applied": bool(company_doc_key),
                 "years": list(years or []),
                 "target_names": target_names,
                 "kept": len(items),
@@ -1709,6 +1796,7 @@ class DualRetriever(Retriever):
         t2c_style: str = "direct",
         retrieval_query_text: str | None = None,
         metrics_doc_id: str | None = None,
+        metrics_company_doc_key: str | None = None,
         metrics_plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         search_text = retrieval_query_text or query_text
@@ -1716,6 +1804,7 @@ class DualRetriever(Retriever):
             self.metrics_retriever.search(
                 query_text=query_text,
                 doc_id=metrics_doc_id,
+                company_doc_key=metrics_company_doc_key,
                 years=list((metrics_plan or {}).get("years") or []),
                 plan=metrics_plan,
             )
@@ -1838,7 +1927,16 @@ def main() -> None:
         action="store_true",
         help=(
             "Experiment only: do not restrict the deterministic metrics TableCell retriever "
-            "to the question's doc_id. Hybrid retrieval is unaffected."
+            "to the exact question doc_id; use a company-level doc_id prefix filter instead. "
+            "Hybrid retrieval is unaffected."
+        ),
+    )
+    parser.add_argument(
+        "--metrics-table-no-filter",
+        action="store_true",
+        help=(
+            "Experiment only: do not apply either doc_id or company filtering in the "
+            "deterministic metrics TableCell retriever."
         ),
     )
     parser.add_argument(
@@ -2050,6 +2148,8 @@ def main() -> None:
                 else {
                     "rewritten_query": question_text,
                     "company": None,
+                    "company_source": None,
+                    "company_doc_key": None,
                     "years": [],
                     "operation": "disabled",
                     "components": [],
@@ -2060,6 +2160,8 @@ def main() -> None:
                 "query_rewrite_applied": bool(args.use_query_rewrite),
                 "retrieval_query": query_rewrite_plan["rewritten_query"],
                 "query_rewrite_company": query_rewrite_plan["company"],
+                "query_rewrite_company_source": query_rewrite_plan["company_source"],
+                "query_rewrite_company_doc_key": query_rewrite_plan["company_doc_key"],
                 "query_rewrite_years": query_rewrite_plan["years"],
                 "query_rewrite_operation": query_rewrite_plan["operation"],
                 "query_rewrite_components": query_rewrite_plan["components"],
@@ -2094,9 +2196,17 @@ def main() -> None:
                             "rewritten_query"
                         ]
                         if effective_style == "calculation":
-                            retriever_config["metrics_doc_id"] = (
-                                None if args.metrics_table_no_doc_id else row["doc_id"]
-                            )
+                            if args.metrics_table_no_filter:
+                                retriever_config["metrics_doc_id"] = None
+                                retriever_config["metrics_company_doc_key"] = None
+                            elif args.metrics_table_no_doc_id:
+                                retriever_config["metrics_doc_id"] = None
+                                retriever_config["metrics_company_doc_key"] = query_rewrite_plan[
+                                    "company_doc_key"
+                                ]
+                            else:
+                                retriever_config["metrics_doc_id"] = row["doc_id"]
+                                retriever_config["metrics_company_doc_key"] = None
                             retriever_config["metrics_plan"] = query_rewrite_plan
                 elif args.retriever_mode == "text2cypher":
                     retriever_config["t2c_style"] = effective_style
