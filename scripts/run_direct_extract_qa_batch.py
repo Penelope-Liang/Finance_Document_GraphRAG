@@ -28,6 +28,17 @@ from neo4j_graphrag.tools.batch_ask import (
 )
 
 
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - optional dependency
+    np = None
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - optional dependency
+    pd = None
+
+
 TEXT2CYPHER_EXAMPLES_CALCULATION = [
     """User: What is the FY2019 fixed asset turnover ratio for Activision Blizzard? Fixed asset turnover ratio is defined as: FY2019 revenue / (average PP&E between FY2018 and FY2019). Round your answer to two decimal places.
 Cypher:
@@ -225,9 +236,66 @@ def _load_questions(path: Path) -> list[dict]:
     return rows
 
 
+def _sanitize_value(value: Any) -> Any:
+    """Convert non-JSON-safe missing numeric values to None.
+
+    Missing financial values must not be coerced to 0 because that changes the
+    meaning of later ratios/margins. None keeps them explicitly missing.
+    """
+    if value is None:
+        return None
+    if pd is not None and value is pd.NA:
+        return None
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    if np is not None and isinstance(value, np.floating):
+        value = float(value)
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    if np is not None and isinstance(value, np.integer):
+        return int(value)
+    return value
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_for_json(v) for v in obj)
+    return _sanitize_value(obj)
+
+
+def _assert_valid_json_payload(payload: Any) -> None:
+    json.dumps(payload, allow_nan=False)
+
+
+def _sanitize_retriever_item(item: RetrieverResultItem) -> RetrieverResultItem:
+    return RetrieverResultItem(
+        content=str(item.content or ""),
+        metadata=_sanitize_for_json(dict(item.metadata or {})),
+    )
+
+
+def _sanitize_retriever_result(result: RetrieverResult) -> RetrieverResult:
+    return RetrieverResult(
+        items=[_sanitize_retriever_item(item) for item in (result.items or [])],
+        metadata=_sanitize_for_json(dict(result.metadata or {})),
+    )
+
+
 def _save_results(output_path: Path, results: list[dict[str, Any]]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_results = _sanitize_for_json(results)
+    _assert_valid_json_payload(safe_results)
+    output_path.write_text(
+        json.dumps(safe_results, indent=2, ensure_ascii=False, allow_nan=False),
+        encoding="utf-8",
+    )
 
 
 def _strip_think(text: str) -> str:
@@ -1091,14 +1159,18 @@ class MetricsTableCellRetriever(Retriever):
             item = _format_table_record(record)
             metadata = dict(item.metadata or {})
             metadata["source"] = "metrics_table"
-            metadata["target_name"] = record.get("target_name")
+            metadata["target_name"] = _sanitize_value(record.get("target_name"))
             metadata["section_hit"] = int(record.get("section_hit") or 0)
             metadata["row_hit"] = int(record.get("row_hit") or 0)
             metadata["year_hit"] = int(record.get("year_hit") or 0)
             content = f"Metric target: {record.get('target_name')}\n{item.content}"
-            items.append(RetrieverResultItem(content=content, metadata=metadata))
+            items.append(
+                _sanitize_retriever_item(
+                    RetrieverResultItem(content=content, metadata=metadata)
+                )
+            )
 
-        return RetrieverResult(
+        return _sanitize_retriever_result(RetrieverResult(
             items=items,
             metadata={
                 "__retriever": "MetricsTableCellRetriever",
@@ -1111,7 +1183,7 @@ class MetricsTableCellRetriever(Retriever):
                 "target_names": target_names,
                 "kept": len(items),
             },
-        )
+        ))
 
 
 class StyleRoutingText2CypherRetriever(Retriever):
@@ -1136,7 +1208,7 @@ class StyleRoutingText2CypherRetriever(Retriever):
 
     def search(self, query_text: str, t2c_style: str = "direct", **kwargs: Any) -> RetrieverResult:
         inner = self._calc if t2c_style == "calculation" else self._direct
-        return inner.search(query_text=query_text)
+        return _sanitize_retriever_result(inner.search(query_text=query_text))
 
 
 def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
@@ -1186,7 +1258,10 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         if value is None:
             return default
-        return float(value)
+        parsed = float(value)
+        if math.isnan(parsed) or math.isinf(parsed):
+            return default
+        return parsed
     except (TypeError, ValueError):
         return default
 
@@ -1233,10 +1308,11 @@ def _item_base_score(item: RetrieverResultItem) -> float:
 def _softmax_normalize(scores: list[float]) -> list[float]:
     if not scores:
         return []
+    scores = [_safe_float(score) for score in scores]
     max_score = max(scores)
     exps = [math.exp(score - max_score) for score in scores]
     total = sum(exps)
-    if total <= 0:
+    if total <= 0 or math.isnan(total) or math.isinf(total):
         return [0.0 for _ in scores]
     return [value / total for value in exps]
 
@@ -1285,19 +1361,20 @@ def _attach_fusion_scores(
         else:
             source_weight = 1.0
         fused_score = source_weight * normalized_by_idx[idx] + bonus_weight * bonuses[idx]
+        fused_score = _safe_float(fused_score)
         metadata.update(
             {
-                "raw_score": base_scores[idx],
-                "normalized_score": normalized_by_idx[idx],
-                "constraint_bonus": bonuses[idx],
-                "source_weight": source_weight,
+                "raw_score": _safe_float(base_scores[idx]),
+                "normalized_score": _safe_float(normalized_by_idx[idx]),
+                "constraint_bonus": _safe_float(bonuses[idx]),
+                "source_weight": _safe_float(source_weight),
                 "fused_score": fused_score,
             }
         )
         fused_items.append(
             RetrieverResultItem(
                 content=item.content,
-                metadata=metadata,
+                metadata=_sanitize_for_json(metadata),
             )
         )
     return fused_items
@@ -1388,16 +1465,16 @@ class LLMJudgeRetriever(Retriever):
         raise NotImplementedError("LLMJudgeRetriever wraps search(), not raw Neo4j records.")
 
     def search(self, *args: Any, **kwargs: Any) -> RetrieverResult:
-        result = self.inner_retriever.search(*args, **kwargs)
+        result = _sanitize_retriever_result(self.inner_retriever.search(*args, **kwargs))
         if not result.items:
             return result
 
         query_text = kwargs.get("query_text") or (args[0] if args else "")
         if not query_text:
-            return RetrieverResult(
+            return _sanitize_retriever_result(RetrieverResult(
                 items=result.items,
                 metadata={**(result.metadata or {}), "llm_judge_applied": False},
-            )
+            ))
 
         prompt = _judge_prompt(query_text, result.items, self.judge_max_chars)
         try:
@@ -1414,19 +1491,19 @@ class LLMJudgeRetriever(Retriever):
             ]
             if not judged_items:
                 judged_items = result.items
-            return RetrieverResult(
+            return _sanitize_retriever_result(RetrieverResult(
                 items=judged_items,
                 metadata={
                     **(result.metadata or {}),
                     "llm_judge_applied": True,
                     "llm_judge_kept": len(judged_items),
                 },
-            )
+            ))
         except Exception:
-            return RetrieverResult(
+            return _sanitize_retriever_result(RetrieverResult(
                 items=result.items,
                 metadata={**(result.metadata or {}), "llm_judge_applied": False},
-            )
+            ))
 
 
 def _is_retryable_llm_error(exc: Exception) -> bool:
@@ -1475,7 +1552,7 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
     text = str(record.get("text") or "").strip()
     doc_id = str(record.get("doc_id") or "").strip()
     section_name = str(record.get("section_name") or "").strip()
-    table_cells = record.get("table_cells") or []
+    table_cells = _sanitize_for_json(record.get("table_cells") or [])
     lines = []
     if section_name:
         lines.append(f"Section: {section_name}")
@@ -1500,24 +1577,24 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
         lines.append(str(record))
     return RetrieverResultItem(
         content="\n".join(lines),
-        metadata={
+        metadata=_sanitize_for_json({
             "doc_id": doc_id or None,
             "section_name": section_name or None,
             "similarity_score": record.get("similarity_score"),
             "source": "chunk",
-        },
+        }),
     )
 
 
 def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
-    doc_id = record.get("doc_id")
+    doc_id = _sanitize_value(record.get("doc_id"))
     section_name = str(record.get("section_name") or "").strip()
-    row_header = record.get("row_header")
-    col_header = record.get("col_header")
-    text = record.get("text")
-    numeric_value = record.get("numeric_value")
-    numeric_kind = record.get("numeric_kind")
-    scale = record.get("scale")
+    row_header = _sanitize_value(record.get("row_header"))
+    col_header = _sanitize_value(record.get("col_header"))
+    text = _sanitize_value(record.get("text"))
+    numeric_value = _sanitize_value(record.get("numeric_value"))
+    numeric_kind = _sanitize_value(record.get("numeric_kind"))
+    scale = _sanitize_value(record.get("scale"))
     content = (
         f"Section: {section_name}\n"
         f"Table evidence: row={row_header!r}; col={col_header!r}; text={text!r}; "
@@ -1525,13 +1602,13 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
     )
     return RetrieverResultItem(
         content=content,
-        metadata={
+        metadata=_sanitize_for_json({
             "doc_id": doc_id,
             "section_name": section_name or None,
             "row_header": row_header,
             "col_header": col_header,
             "source": "table",
-        },
+        }),
     )
 
 
@@ -1757,13 +1834,15 @@ class PrimaryStatementRetriever(Retriever):
             metadata = dict(item.metadata or {})
             metadata["source"] = "primary_statement"
             metadata["statement_type"] = spec["name"]
-            metadata["chunk_statement_type"] = record.get("chunk_statement_type")
+            metadata["chunk_statement_type"] = _sanitize_value(record.get("chunk_statement_type"))
             metadata["match_priority"] = int(record.get("match_priority") or 0)
             items.append(
-                RetrieverResultItem(content=item.content, metadata=metadata)
+                _sanitize_retriever_item(
+                    RetrieverResultItem(content=item.content, metadata=metadata)
+                )
             )
 
-        return RetrieverResult(
+        return _sanitize_retriever_result(RetrieverResult(
             items=items,
             metadata={
                 "__retriever": "PrimaryStatementRetriever",
@@ -1772,7 +1851,7 @@ class PrimaryStatementRetriever(Retriever):
                 "doc_id": doc_id,
                 "kept": len(items),
             },
-        )
+        ))
 
 
 class DualRetriever(Retriever):
@@ -1822,20 +1901,21 @@ class DualRetriever(Retriever):
             and metrics_plan is not None
             else RetrieverResult(items=[], metadata={"__retriever": "MetricsTableCellRetriever", "matched": False})
         )
-        chunk_result = self.chunk_retriever.search(
+        metrics_result = _sanitize_retriever_result(metrics_result)
+        chunk_result = _sanitize_retriever_result(self.chunk_retriever.search(
             query_text=search_text,
             top_k=top_k,
             effective_search_ratio=effective_search_ratio,
             query_params=query_params,
-        )
+        ))
         if isinstance(self.table_retriever, StyleRoutingText2CypherRetriever):
-            table_result = self.table_retriever.search(
+            table_result = _sanitize_retriever_result(self.table_retriever.search(
                 query_text=search_text, t2c_style=t2c_style
-            )
+            ))
         else:
-            table_result = self.table_retriever.search(query_text=search_text)
+            table_result = _sanitize_retriever_result(self.table_retriever.search(query_text=search_text))
         primary_result = (
-            self.primary_retriever.search(query_text=search_text, query_params=query_params)
+            _sanitize_retriever_result(self.primary_retriever.search(query_text=search_text, query_params=query_params))
             if self.primary_retriever is not None
             else RetrieverResult(items=[], metadata={"__retriever": "PrimaryStatementRetriever", "matched": False})
         )
@@ -1859,7 +1939,7 @@ class DualRetriever(Retriever):
             reverse=True,
         )
 
-        return RetrieverResult(
+        return _sanitize_retriever_result(RetrieverResult(
             items=items,
             metadata={
                 "__retriever": "DualRetriever",
@@ -1875,7 +1955,7 @@ class DualRetriever(Retriever):
                     "bonus_weight": 0.15,
                 },
             },
-        )
+        ))
 
 
 def main() -> None:
@@ -2233,6 +2313,11 @@ def main() -> None:
                 )
                 raw_answer = result.answer
                 answer, evidence = _parse_answer(raw_answer)
+                retriever_result_dump = (
+                    _sanitize_for_json(result.retriever_result.model_dump())
+                    if result.retriever_result is not None
+                    else None
+                )
                 elapsed = round(time.time() - start, 2)
                 results.append(
                     {
@@ -2244,11 +2329,7 @@ def main() -> None:
                         "answer": answer,
                         "evidence": evidence,
                         "raw_answer": raw_answer,
-                        "retriever_result": (
-                            result.retriever_result.model_dump()
-                            if result.retriever_result is not None
-                            else None
-                        ),
+                        "retriever_result": retriever_result_dump,
                         "time_seconds": elapsed,
                         "error": None,
                         **style_fields,
