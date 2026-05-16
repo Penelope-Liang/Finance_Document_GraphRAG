@@ -55,27 +55,43 @@ def _parse_prometheus_score(raw: str) -> int | None:
         except (TypeError, ValueError):
             pass
 
+    strict_score = re.search(r"###Score:\s*([1-5])\b", text, flags=re.IGNORECASE)
+    if strict_score:
+        return int(strict_score.group(1))
+
+    rationale_match = re.search(
+        r"###Rationale:\s*(.*?)(?:\[END\]\s*)?$",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    score_text = rationale_match.group(1) if rationale_match else text
+
     patterns = (
+        r"\boverall\s+score\s*(?:of|is|:|=)\s*([1-5])\b",
         r"\bscore\s*(?:of|is|:|=)\s*([1-5])\b",
         r"\breceive\s+a\s+score\s+of\s+([1-5])\b",
-        r"\bscore\s+([1-5])\b",
+        r"\bwould\s+receive\s+(?:a\s+)?score\s+of\s+([1-5])\b",
+        r"\boverall\s+score\s+is\s+([1-5])\b",
         r"\b([1-5])\s*/\s*5\b",
-        r"\[\s*([1-5])\s*\]",
     )
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
+        match = re.search(pattern, score_text, flags=re.IGNORECASE)
         if match:
             return int(match.group(1))
 
     # Prometheus often emits only a rationale with rubric wording.
-    lowered = text.lower()
+    lowered = score_text.lower()
     phrase_scores = (
         ("fully correct", 5),
         ("perfect match", 5),
         ("mostly correct", 4),
         ("essentially correct", 4),
+        ("correctly identifies", 4),
         ("partially correct", 3),
         ("mostly incorrect", 2),
+        ("candidate answer is missing", 1),
+        ("response is missing", 1),
+        ("answer is missing", 1),
         ("incorrect", 1),
     )
     for phrase, score in phrase_scores:
@@ -87,7 +103,11 @@ def _parse_prometheus_score(raw: str) -> int | None:
 def _extract_rationale(raw: str) -> str:
     text = _strip_think(raw).strip()
     text = re.sub(r"\[END\]\s*$", "", text).strip()
-    match = re.search(r"###Rationale:\s*(.*)", text, flags=re.DOTALL | re.IGNORECASE)
+    match = re.search(
+        r"###Rationale:\s*(.*?)(?:###Score:|$)",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
     if match:
         return match.group(1).strip()
     obj = _extract_json_object(text)
@@ -142,6 +162,13 @@ unsupported claims, missing required reasoning, or answers contradicted by the r
 2: Mostly incorrect with only a small relevant part.
 1: Incorrect, unsupported, or missing.
 
+You must output exactly this format:
+###Rationale:
+<brief explanation>
+
+###Score:
+<one integer from 1 to 5>
+
 ###Rationale:"""
 
 
@@ -154,6 +181,12 @@ def main() -> None:
     parser.add_argument("--sleep", type=float, default=0.2)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--question-id",
+        action="append",
+        default=[],
+        help="Question ID to judge. Can be passed multiple times. Defaults to all rows.",
+    )
     args = parser.parse_args()
 
     host = os.environ.get("OLLAMA_HOST")
@@ -165,8 +198,12 @@ def main() -> None:
     )
 
     rows = _load_rows(args.input)
-    total = len(rows) if args.limit <= 0 else min(args.limit, len(rows))
-    for idx, row in enumerate(rows[:total], start=1):
+    selected_ids = set(args.question_id)
+    selected_rows = [row for row in rows if not selected_ids or row.get("question_id") in selected_ids]
+    if args.limit > 0:
+        selected_rows = selected_rows[: args.limit]
+    total = len(selected_rows)
+    for idx, row in enumerate(selected_rows, start=1):
         existing = row.get("llm_judge")
         if existing and existing.get("score") is not None and not args.overwrite:
             continue
