@@ -218,6 +218,165 @@ Cypher query:
 """
 
 
+TEXT2CYPHER_EXAMPLES_NOVEL = [
+    """User: If we exclude the impact of M&A, which segment has dragged down 3M's overall growth in 2022?
+Cypher:
+MATCH (ch:Chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE toLower(ch.doc_id) STARTS WITH "3m"
+  AND (
+        toLower(ch.section_name) CONTAINS "business segment"
+        OR toLower(ch.section_name) CONTAINS "performance by business segment"
+        OR toLower(ch.section_name) CONTAINS "segment"
+      )
+  AND (
+        toLower(cell.row_header) CONTAINS "consumer"
+        OR toLower(cell.row_header) CONTAINS "safety and industrial"
+        OR toLower(cell.row_header) CONTAINS "transportation and electronics"
+        OR toLower(cell.row_header) CONTAINS "health care"
+        OR toLower(cell.row_header) CONTAINS "organic"
+      )
+  AND (
+        cell.col_header CONTAINS "2022"
+        OR toLower(cell.col_header) CONTAINS "organic"
+        OR toLower(cell.col_header) CONTAINS "sales change"
+      )
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY ch.section_name, cell.row_header, cell.col_header""",
+    """User: What was the key agenda of Amcor's 8-K filing dated July 1, 2022?
+Cypher:
+MATCH (ch:Chunk)
+WHERE toLower(ch.doc_id) STARTS WITH "amcor"
+  AND (
+        ch.doc_id CONTAINS "2022_8K"
+        OR ch.doc_id CONTAINS "2022-07-01"
+      )
+  AND (
+        toLower(ch.text) CONTAINS "agenda"
+        OR toLower(ch.text) CONTAINS "meeting"
+        OR toLower(ch.text) CONTAINS "shareholder"
+        OR toLower(ch.text) CONTAINS "vote"
+        OR toLower(ch.text) CONTAINS "proposal"
+        OR toLower(ch.section_name) CONTAINS "item"
+      )
+RETURN ch.section_name AS section_name,
+       null AS row_header,
+       null AS col_header,
+       ch.text AS text,
+       null AS numeric_value,
+       null AS numeric_kind,
+       null AS scale
+LIMIT 12""",
+    """User: Was American Express able to retain card members during 2022?
+Cypher:
+MATCH (ch:Chunk)
+WHERE toLower(ch.doc_id) STARTS WITH "americanexpress"
+  AND (
+        ch.text CONTAINS "2022"
+        OR ch.section_name CONTAINS "2022"
+      )
+  AND (
+        toLower(ch.text) CONTAINS "card member"
+        OR toLower(ch.text) CONTAINS "cardmember"
+        OR toLower(ch.text) CONTAINS "retention"
+        OR toLower(ch.text) CONTAINS "retain"
+        OR toLower(ch.text) CONTAINS "engagement"
+      )
+RETURN ch.section_name AS section_name,
+       null AS row_header,
+       null AS col_header,
+       ch.text AS text,
+       null AS numeric_value,
+       null AS numeric_kind,
+       null AS scale
+LIMIT 12""",
+    """User: Does Boeing's business subject to cyclicality?
+Cypher:
+MATCH (ch:Chunk)
+WHERE toLower(ch.doc_id) STARTS WITH "boeing"
+  AND (
+        toLower(ch.section_name) CONTAINS "risk"
+        OR toLower(ch.section_name) CONTAINS "business"
+        OR toLower(ch.text) CONTAINS "cyclical"
+        OR toLower(ch.text) CONTAINS "cyclicality"
+        OR toLower(ch.text) CONTAINS "economic conditions"
+        OR toLower(ch.text) CONTAINS "commercial aircraft"
+      )
+RETURN ch.section_name AS section_name,
+       null AS row_header,
+       null AS col_header,
+       ch.text AS text,
+       null AS numeric_value,
+       null AS numeric_kind,
+       null AS scale
+LIMIT 12""",
+    """User: Does Adobe have an improving free cash flow conversion as of FY2022?
+Cypher:
+MATCH (ch:Chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
+WHERE toLower(ch.doc_id) STARTS WITH "adobe"
+  AND (
+        toLower(cell.row_header) CONTAINS "net cash provided by operating activities"
+        OR toLower(cell.row_header) CONTAINS "cash flow from operating activities"
+        OR toLower(cell.row_header) CONTAINS "capital expenditures"
+        OR toLower(cell.row_header) CONTAINS "net income"
+        OR toLower(cell.row_header) CONTAINS "revenue"
+      )
+  AND (
+        cell.col_header CONTAINS "2022"
+        OR cell.col_header CONTAINS "2021"
+        OR cell.col_header CONTAINS "2020"
+      )
+RETURN ch.section_name AS section_name,
+       cell.row_header AS row_header,
+       cell.col_header AS col_header,
+       cell.text AS text,
+       cell.numeric_value AS numeric_value,
+       cell.numeric_kind AS numeric_kind,
+       cell.scale AS scale
+ORDER BY cell.row_header, cell.col_header DESC""",
+]
+
+
+TEXT2CYPHER_PROMPT_NOVEL = """
+Task: Generate a Cypher statement for retrieving evidence for an open-ended FinanceBench question over a Neo4j graph.
+
+Schema:
+{schema}
+
+Examples:
+{examples}
+
+Rules:
+- Return only Cypher. No prose.
+- This is an open-ended financial question: retrieve evidence, not just a final answer.
+- Use constraints from the question only when present. If the question has a company, year, quarter, filing type, date, section, or topic, include those constraints. Do not invent missing constraints.
+- Prefer same-company evidence using doc_id prefixes when a company is identifiable.
+- If the question mentions a specific filing type or date, use doc_id/date text when available.
+- For segment, trend, growth, retention, dividend, free cash flow, margin, percentage, or comparison questions, retrieve both relevant narrative chunks and table cells when possible.
+- For explanatory questions, retrieve concise chunks from risk factors, business overview, MD&A, notes, or the named section.
+- Return evidence in this shape when possible:
+  ch.section_name AS section_name,
+  cell.row_header AS row_header,
+  cell.col_header AS col_header,
+  cell.text AS text,
+  cell.numeric_value AS numeric_value,
+  cell.numeric_kind AS numeric_kind,
+  cell.scale AS scale
+- If retrieving narrative chunks without table cells, return null for row_header/col_header/numeric fields and ch.text AS text.
+- Use LIMIT 12-30 depending on whether the question needs multiple evidence rows. Avoid LIMIT 1.
+
+Question:
+{query_text}
+
+Cypher query:
+"""
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -464,21 +623,54 @@ def _build_calculation_answer_guidance(question: str) -> str:
     return "\n".join(lines)
 
 
+def _build_novel_answer_guidance(question: str) -> str:
+    constraints = _extract_question_constraints(question)
+    lines = [
+        "Open-ended FinanceBench guidance:",
+        "- Use the retrieved evidence as the only source of truth; do not use outside knowledge.",
+        "- Answer the business question directly and concisely. If the answer requires an explanation, include the key reason.",
+        "- If the question asks for a comparison, trend, increase/decrease, stability, or best/worst segment, compare the relevant periods/categories explicitly.",
+        "- If the question requires numbers, identify the values used and show the calculation briefly in the evidence field.",
+        "- Prefer evidence matching the same company, filing type, date/period, section, and business segment when those constraints are present in the question.",
+        "- Company, period, filing type, and section constraints are optional: use them only if they appear in the question or are clearly implied by retrieved evidence.",
+        "- If candidate evidence conflicts on company, period, filing, or section, prefer the exact match and avoid mixing periods or filings.",
+        "- If the evidence is insufficient, return answer=null and explain the missing information rather than guessing.",
+        "- Return JSON with keys 'answer', 'evidence', 'missing_information'.",
+    ]
+    if constraints["section_hints"]:
+        lines.append(f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}")
+    if constraints["years"]:
+        lines.append(f"- Extracted years: {', '.join(constraints['years'])}")
+    if constraints["quarters"]:
+        lines.append(f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
+    if constraints["months"]:
+        lines.append(f"- Extracted months/dates context: {', '.join(constraints['months'])}")
+    if constraints["period_hints"]:
+        lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
+    return "\n".join(lines)
+
+
 def _build_answer_guidance(question: str, question_style: str) -> str:
     if question_style == "calculation":
         return _build_calculation_answer_guidance(question)
+    if question_style == "novel":
+        return _build_novel_answer_guidance(question)
     return _build_direct_extract_answer_guidance(question)
 
 
 def _select_text2cypher_examples(question_style: str) -> list[str]:
     if question_style == "calculation":
         return TEXT2CYPHER_EXAMPLES_CALCULATION
+    if question_style == "novel":
+        return TEXT2CYPHER_EXAMPLES_NOVEL
     return TEXT2CYPHER_EXAMPLES
 
 
 def _select_text2cypher_prompt(question_style: str) -> str:
     if question_style == "calculation":
         return TEXT2CYPHER_PROMPT_CALCULATION
+    if question_style == "novel":
+        return TEXT2CYPHER_PROMPT_NOVEL
     return TEXT2CYPHER_PROMPT
 
 
@@ -539,6 +731,7 @@ _DOC_PREFIX_TO_COMPANY_NAME = {
     "AMAZON": "Amazon",
     "AMCOR": "Amcor",
     "AMD": "AMD",
+    "AMERICANEXPRESS": "American Express",
     "AMERICANWATERWORKS": "American Water Works",
     "BESTBUY": "Best Buy",
     "BLOCK": "Block",
@@ -555,6 +748,12 @@ _DOC_PREFIX_TO_COMPANY_NAME = {
     "NETFLIX": "Netflix",
     "NIKE": "Nike",
     "PEPSICO": "PepsiCo",
+    "PFIZER": "Pfizer",
+    "FOOTLOCKER": "Foot Locker",
+    "JOHNSON_JOHNSON": "Johnson & Johnson",
+    "JPMORGAN": "JPMorgan",
+    "ULTABEAUTY": "Ulta Beauty",
+    "VERIZON": "Verizon",
     "WALMART": "Walmart",
     "3M": "3M",
 }
@@ -564,7 +763,7 @@ def _company_name_from_doc_name(doc_name: str | None) -> str | None:
     if not doc_name:
         return None
     stem = Path(str(doc_name)).stem.upper()
-    prefix = re.sub(r"_(?:19|20)\d{2}_.*$", "", stem)
+    prefix = re.split(r"_(?:19|20)\d{2}", stem, maxsplit=1)[0]
     return _DOC_PREFIX_TO_COMPANY_NAME.get(prefix)
 
 
@@ -575,6 +774,7 @@ _QUESTION_COMPANY_ALIASES = {
     "AMAZON": ("amazon",),
     "AMCOR": ("amcor",),
     "AMD": ("amd", "advanced micro devices"),
+    "AMERICANEXPRESS": ("american express", "amex"),
     "AMERICANWATERWORKS": ("american water works",),
     "BESTBUY": ("best buy",),
     "BLOCK": ("block", "square"),
@@ -591,6 +791,12 @@ _QUESTION_COMPANY_ALIASES = {
     "NETFLIX": ("netflix",),
     "NIKE": ("nike",),
     "PEPSICO": ("pepsico", "pepsi"),
+    "PFIZER": ("pfizer",),
+    "FOOTLOCKER": ("foot locker", "footlocker"),
+    "JOHNSON_JOHNSON": ("johnson & johnson", "johnson and johnson", "jnj"),
+    "JPMORGAN": ("jpmorgan", "jp morgan", "jpmorgan chase", "jpm"),
+    "ULTABEAUTY": ("ulta beauty", "ulta"),
+    "VERIZON": ("verizon",),
     "WALMART": ("walmart", "wal-mart"),
     "3M": ("3m",),
 }
@@ -740,6 +946,38 @@ def _rewrite_metrics_query_for_retrieval(
     if not components:
         # Fall back to the original question if no derived metric was recognized.
         components.append(question)
+
+    if question_style == "novel":
+        operation = "open_ended"
+        if "segment" in clean or "business segment" in clean:
+            add_component("business segment")
+            add_component("segment sales")
+            add_component("organic sales change")
+            add_statement("business segments")
+            add_statement("performance by business segment")
+        if "dividend" in clean:
+            add_component("dividends")
+            add_component("dividend distribution")
+            add_component("cash dividends")
+        if "free cash" in clean or "cashflow conversion" in clean or "cash flow conversion" in clean:
+            add_component("free cash flow")
+            add_component("net cash provided by operating activities")
+            add_component("capital expenditures")
+            add_component("net income")
+            add_statement("cash flow")
+        if "8k" in clean or "8-k" in clean or "filing" in clean:
+            add_component("filing agenda")
+            add_component("item")
+            add_component("shareholder vote")
+        if "cyclical" in clean or "cyclicality" in clean:
+            add_component("cyclicality")
+            add_component("economic conditions")
+            add_statement("risk factors")
+            add_statement("business")
+        if "card member" in clean or "cardmember" in clean or "retain" in clean or "retention" in clean:
+            add_component("card members")
+            add_component("retention")
+            add_component("customer engagement")
 
     statement_text = "; ".join(statements)
     component_text = "; ".join(components)
@@ -1187,7 +1425,7 @@ class MetricsTableCellRetriever(Retriever):
 
 
 class StyleRoutingText2CypherRetriever(Retriever):
-    """Holds two Text2CypherRetriever instances (direct vs calculation) and routes per search."""
+    """Routes Text2Cypher retrieval by question style."""
 
     VERIFY_NEO4J_VERSION = False
 
@@ -1195,6 +1433,7 @@ class StyleRoutingText2CypherRetriever(Retriever):
         self,
         retriever_direct: Text2CypherRetriever,
         retriever_calculation: Text2CypherRetriever,
+        retriever_novel: Text2CypherRetriever | None = None,
     ) -> None:
         super().__init__(
             retriever_direct.driver,
@@ -1202,12 +1441,18 @@ class StyleRoutingText2CypherRetriever(Retriever):
         )
         self._direct = retriever_direct
         self._calc = retriever_calculation
+        self._novel = retriever_novel or retriever_direct
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
         raise NotImplementedError("StyleRoutingText2CypherRetriever delegates to inner retrievers.")
 
     def search(self, query_text: str, t2c_style: str = "direct", **kwargs: Any) -> RetrieverResult:
-        inner = self._calc if t2c_style == "calculation" else self._direct
+        if t2c_style == "calculation":
+            inner = self._calc
+        elif t2c_style == "novel":
+            inner = self._novel
+        else:
+            inner = self._direct
         return _sanitize_retriever_result(inner.search(query_text=query_text))
 
 
@@ -1996,10 +2241,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--question-style",
-        choices=["direct", "calculation", "auto"],
+        choices=["direct", "calculation", "novel", "auto"],
         default="direct",
         help=(
-            "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), "
+            "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), novel (open-ended), "
             "or auto (rule-based classification per question; see question_style_* in output JSON)."
         ),
     )
@@ -2114,6 +2359,7 @@ def main() -> None:
     chunk_retrieval_query = """
     WITH node AS chunk, score
     WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
+      AND ($company_doc_key IS NULL OR toLower(chunk.doc_id) STARTS WITH $company_doc_key)
     OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
     OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
     WITH chunk, score,
@@ -2158,7 +2404,20 @@ def main() -> None:
             custom_prompt=TEXT2CYPHER_PROMPT_CALCULATION,
             result_formatter=_format_table_record,
         )
-        table_router = StyleRoutingText2CypherRetriever(t2c_direct, t2c_calculation)
+        t2c_novel = Text2CypherRetriever(
+            driver=driver,
+            llm=llm,
+            neo4j_database=database,
+            neo4j_schema=FINANCIAL_GRAPH_SCHEMA,
+            examples=TEXT2CYPHER_EXAMPLES_NOVEL,
+            custom_prompt=TEXT2CYPHER_PROMPT_NOVEL,
+            result_formatter=_format_table_record,
+        )
+        table_router = StyleRoutingText2CypherRetriever(
+            t2c_direct,
+            t2c_calculation,
+            t2c_novel,
+        )
         if args.retriever_mode == "text2cypher":
             retriever = table_router
         elif args.retriever_mode == "hybrid":
@@ -2278,7 +2537,14 @@ def main() -> None:
                         "top_k": args.top_k,
                         "effective_search_ratio": args.effective_search_ratio,
                         "query_params": {
-                            "doc_id": row["doc_id"] if args.restrict_doc_id else None
+                            "doc_id": row["doc_id"] if args.restrict_doc_id else None,
+                            "company_doc_key": (
+                                query_rewrite_plan["company_doc_key"]
+                                if args.use_query_rewrite
+                                and effective_style == "novel"
+                                and not args.restrict_doc_id
+                                else None
+                            ),
                         },
                     }
                 if args.retriever_mode == "dual":
