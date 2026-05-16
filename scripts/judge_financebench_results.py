@@ -135,41 +135,50 @@ def _judge_prompt(
     question: str,
     response: Any,
     reference_answer: Any,
-    evidence: str,
+    evidence: str = "",
 ) -> str:
+    evidence_section = ""
+    if evidence.strip():
+        evidence_section = f"""
+###Retrieved Evidence:
+Evidence is optional auxiliary context only. Do not penalize the response for lacking citations
+or explicit supporting evidence. Use evidence only to resolve ambiguity or detect contradiction.
+{evidence}
+"""
     return f"""###Task Description:
-An instruction, a response to evaluate, a reference answer, and retrieved evidence are given.
-Evaluate whether the response correctly answers the instruction compared with the reference answer.
-Allow equivalent wording and minor rounding differences. Penalize wrong company, wrong period,
-unsupported claims, missing required reasoning, or answers contradicted by the reference/evidence.
+You are evaluating FinanceBench answer correctness. Focus on good-faith financial substance:
+whether the response correctly answers the instruction compared with the reference answer.
+Do not require citations, evidence references, or reasoning steps. A concise answer is fully
+correct if it contains the correct financial fact, entity, direction, amount, or conclusion.
+Allow equivalent wording, common financial abbreviations, equivalent units, and minor rounding
+differences. Growth direction (positive/negative) must be correct.
+
+Penalize: wrong company, wrong period, wrong sign/direction, wrong entity, missing required
+answer components, hallucinated facts, answers contradicted by the reference answer, or correct
+numbers derived from explicitly wrong logic (if reasoning is provided).
+
+###Reference Answer:
+{reference_answer}
 
 ###Instruction:
 {question}
 
 ###Response:
 {response}
-
-###Reference Answer:
-{reference_answer}
-
-###Retrieved Evidence:
-{evidence}
-
+{evidence_section}
 ###Score Rubric:
-5: Fully correct and adequately supported.
-4: Mostly correct with only minor omissions.
-3: Partially correct but missing an important detail.
-2: Mostly incorrect with only a small relevant part.
-1: Incorrect, unsupported, or missing.
+5: Semantically equivalent to the reference; concise is acceptable; allows different but valid qualitative interpretations if supported by evidence.
+4: Correct financial substance with minor unit/rounding/formatting/wording differences.
+3: Partially correct but missing an important required answer component.
+2: Helpful refusal (explicitly states inability to answer due to missing data or access).
+1: Factually incorrect, hallucinated, wrong direction/sign, contradicted by reference, or correct number with explicitly contradictory logic.
 
 You must output exactly this format:
 ###Rationale:
 <brief explanation>
 
 ###Score:
-<one integer from 1 to 5>
-
-###Rationale:"""
+<one integer from 1 to 5>"""
 
 
 def main() -> None:
@@ -178,6 +187,11 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--judge-model", default=os.environ.get("OLLAMA_JUDGE_MODEL", "vicgalle/prometheus-7b-v2.0:latest"))
     parser.add_argument("--max-evidence-chars", type=int, default=6000)
+    parser.add_argument(
+        "--no-evidence",
+        action="store_true",
+        help="Do not include retrieved evidence in the judge prompt (faster, recommended for correctness-only evaluation).",
+    )
     parser.add_argument("--sleep", type=float, default=0.2)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
@@ -224,11 +238,12 @@ def main() -> None:
             _save_rows(args.output, rows)
             continue
 
+        evidence = "" if args.no_evidence else _evidence_text(row, args.max_evidence_chars)
         prompt = _judge_prompt(
             question=str(question or ""),
             response=answer,
             reference_answer=reference_answer,
-            evidence=_evidence_text(row, args.max_evidence_chars),
+            evidence=evidence,
         )
         try:
             raw = judge.invoke(prompt).content
