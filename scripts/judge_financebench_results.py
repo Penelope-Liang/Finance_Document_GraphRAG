@@ -10,6 +10,11 @@ from typing import Any
 
 from neo4j_graphrag.llm import OllamaLLM
 
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover - tqdm is optional for ad-hoc runs.
+    tqdm = None
+
 
 def _load_rows(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -195,6 +200,7 @@ def main() -> None:
     parser.add_argument("--sleep", type=float, default=0.2)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress output.")
     parser.add_argument(
         "--question-id",
         action="append",
@@ -217,9 +223,22 @@ def main() -> None:
     if args.limit > 0:
         selected_rows = selected_rows[: args.limit]
     total = len(selected_rows)
-    for idx, row in enumerate(selected_rows, start=1):
+    iterator = enumerate(selected_rows, start=1)
+    progress = None
+    if tqdm is not None and not args.no_progress:
+        progress = tqdm(iterator, total=total, desc="Judging", unit="question")
+        iterable = progress
+    else:
+        iterable = iterator
+
+    judged_count = 0
+    elapsed_total = 0.0
+    for idx, row in iterable:
+        item_start = time.perf_counter()
         existing = row.get("llm_judge")
         if existing and existing.get("score") is not None and not args.overwrite:
+            if progress is not None:
+                progress.set_postfix_str("skipped existing")
             continue
 
         answer = row.get("answer")
@@ -269,6 +288,15 @@ def main() -> None:
         _save_rows(args.output, rows)
         if args.sleep > 0:
             time.sleep(args.sleep)
+        elapsed = time.perf_counter() - item_start
+        judged_count += 1
+        elapsed_total += elapsed
+        avg = elapsed_total / judged_count if judged_count else 0.0
+        timing = f"last={elapsed:.1f}s avg={avg:.1f}s judged={judged_count}/{total}"
+        if progress is not None:
+            progress.set_postfix_str(timing)
+        else:
+            print(f"  {timing}")
 
     _save_rows(args.output, rows)
     print(f"Saved judged results to {args.output}")
