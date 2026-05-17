@@ -102,6 +102,7 @@ def _build_domain_answer_guidance(question: str) -> str:
         "- Use retrieved evidence as the only source of truth; do not use outside knowledge.",
         "- Return JSON only with keys 'answer', 'evidence', and 'missing_information'.",
         "- The answer field should be concise: 1-3 sentences. Include the final conclusion and essential explanation if needed.",
+        "- For yes/no finance judgment questions, start the answer with a clear 'Yes' or 'No', then explain briefly.",
         "- Put formulas, raw input values, calculations, and detailed justification in evidence.",
         "- For finance judgment questions, do not answer only based on the company type, industry, or large dollar amounts.",
         "- First find the relevant numbers in the evidence, calculate the needed ratios, and then make the judgment.",
