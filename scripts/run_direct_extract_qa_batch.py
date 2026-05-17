@@ -512,6 +512,40 @@ def _extract_json_object(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+ROUTER_PROMPT = """You are routing FinanceBench questions into exactly one QA pipeline.
+
+Choose exactly one label:
+
+direct
+- The question asks for one specific fact, entity, date, filing item, financial line item, or raw amount.
+- No ratio, formula, percentage change, trend judgment, or multi-step business explanation is required.
+
+calculation
+- The question asks for a computed metric, ratio, margin, turnover, growth rate, percentage, year-over-year change, comparison, increase/decrease, average, ROA/ROE, quick ratio, current ratio, fixed asset turnover, free cash flow conversion, or formula-based answer.
+- This includes yes/no questions where the answer depends mainly on computing or comparing financial values.
+
+domain
+- The question asks for finance/business judgment, financial health, metric applicability, capital intensity, liquidity profile, margin profile, risk, trend explanation, business meaning, whether a metric is useful/meaningful, what drove a change, or why something happened.
+- These questions may require calculations, but the final answer is a business/financial interpretation or judgment.
+
+novel
+- The question is open-ended, multi-step, or cross-section reasoning not mainly a standard financial metric calculation.
+- It may ask about policies, filings, governance, derivatives, customer retention, strategic events, acquisitions, business segments, or other document-specific reasoning.
+
+Priority rules:
+- If the question asks for metric applicability or business interpretation after a calculation, choose domain, not calculation.
+- If it asks only for a formula result or numeric comparison, choose calculation.
+- If it asks only for one fact or raw value, choose direct.
+- If none of the above clearly fits and the question requires broad document reasoning, choose novel.
+
+Return JSON only:
+{{"label": "direct|calculation|domain|novel", "reason": "short reason"}}
+
+Question:
+{question}
+"""
+
+
 _MONTH_NAMES = (
     "january",
     "february",
@@ -745,6 +779,49 @@ def _classify_question_style_auto(question: str) -> tuple[str, float, str]:
         conf = min(0.98, 0.72 + 0.06 * len(hits))
         return "calculation", conf, "matched: " + ", ".join(hits)
     return "direct", 0.88, "no_calculation_heuristics; default_direct"
+
+
+def _parse_router_label(raw: str | None) -> tuple[str | None, str | None]:
+    if not raw:
+        return None, None
+
+    cleaned = _strip_think(raw)
+    payload_text = _extract_json_object(cleaned) or cleaned
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        payload = None
+
+    if isinstance(payload, dict):
+        label = str(payload.get("label") or payload.get("route") or "").strip().lower()
+        reason = payload.get("reason")
+        if label in {"direct", "calculation", "domain", "novel"}:
+            return label, str(reason) if reason is not None else None
+
+    match = re.search(r"\b(direct|calculation|domain|novel)\b", cleaned.lower())
+    return (match.group(1), None) if match else (None, None)
+
+
+def _map_router_label_to_question_style(label: str | None) -> str | None:
+    if label in {"direct", "calculation", "novel"}:
+        return label
+    if label == "domain":
+        # The existing generic QA path for non-template FinanceBench questions is "novel".
+        return "novel"
+    return None
+
+
+def _classify_question_style_llm(llm: Any, question: str) -> tuple[str, float, str, str | None]:
+    prompt = ROUTER_PROMPT.format(question=question)
+    raw = llm.invoke(prompt).content
+    label, reason = _parse_router_label(raw)
+    effective_style = _map_router_label_to_question_style(label)
+    if effective_style is None:
+        fallback_style, fallback_conf, fallback_reason = _classify_question_style_auto(question)
+        return fallback_style, fallback_conf, f"llm_parse_failed; fallback={fallback_reason}", raw
+
+    mapped_note = "" if label == effective_style else f"; mapped {label}->" + effective_style
+    return effective_style, 1.0, f"llm_router={label}{mapped_note}; {reason or 'no_reason'}", raw
 
 
 _DOC_PREFIX_TO_COMPANY_NAME = {
@@ -2263,11 +2340,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--question-style",
-        choices=["direct", "calculation", "novel", "auto"],
+        choices=["direct", "calculation", "novel", "auto", "llm-auto"],
         default="direct",
         help=(
             "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), novel (open-ended), "
-            "or auto (rule-based classification per question; see question_style_* in output JSON)."
+            "auto (rule-based classification per question), or llm-auto (LLM router per question; "
+            "see question_style_* in output JSON)."
         ),
     )
     parser.add_argument(
@@ -2511,15 +2589,22 @@ def main() -> None:
                 effective_style, q_style_conf, q_style_reason = _classify_question_style_auto(
                     question_text
                 )
+                q_style_raw = None
+            elif args.question_style == "llm-auto":
+                effective_style, q_style_conf, q_style_reason, q_style_raw = (
+                    _classify_question_style_llm(llm, question_text)
+                )
             else:
                 effective_style = args.question_style
                 q_style_conf = 1.0
                 q_style_reason = "cli_fixed"
+                q_style_raw = None
             style_fields = {
                 "question_style_mode": args.question_style,
                 "question_style": effective_style,
                 "question_style_confidence": round(float(q_style_conf), 4),
                 "question_style_reason": q_style_reason,
+                "question_style_raw": q_style_raw,
             }
             query_rewrite_plan = (
                 _rewrite_metrics_query_for_retrieval(
