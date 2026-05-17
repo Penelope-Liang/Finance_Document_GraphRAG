@@ -186,11 +186,76 @@ You must output exactly this format:
 <one integer from 1 to 5>"""
 
 
+def _build_ollama_judge(model_name: str) -> Any:
+    host = os.environ.get("OLLAMA_HOST")
+    ollama_kwargs = {"host": host} if host else {}
+    return OllamaLLM(
+        model_name=model_name,
+        model_params={"options": {"temperature": 0}},
+        **ollama_kwargs,
+    )
+
+
+def _invoke_judge(
+    *,
+    judge: Any,
+    prompt: str,
+    llm_as_judge: str,
+    max_tokens: int,
+) -> str:
+    if llm_as_judge == "ollama":
+        return judge.invoke(prompt).content
+
+    response = judge.chat.completions.create(
+        model=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+        messages=[
+            {"role": "system", "content": "You are a precise FinanceBench evaluator."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
+        max_completion_tokens=max_tokens,
+    )
+    return response.choices[0].message.content or ""
+
+
+def _build_azure_openai_judge() -> Any:
+    try:
+        from openai import AzureOpenAI
+    except ImportError as exc:
+        raise ImportError("Azure OpenAI judge requires `pip install openai`.") from exc
+
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
+    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    if not endpoint:
+        raise ValueError("Missing AZURE_OPENAI_ENDPOINT.")
+    if not api_key:
+        raise ValueError("Missing AZURE_OPENAI_API_KEY.")
+
+    return AzureOpenAI(
+        api_version=api_version,
+        azure_endpoint=endpoint,
+        api_key=api_key,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Judge existing FinanceBench QA results with an LLM-as-judge.")
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--llm-as-judge",
+        choices=["ollama", "azure-openai"],
+        default=os.environ.get("LLM_AS_JUDGE", "ollama"),
+        help="Judge backend. Use azure-openai for Azure OpenAI deployments.",
+    )
     parser.add_argument("--judge-model", default=os.environ.get("OLLAMA_JUDGE_MODEL", "vicgalle/prometheus-7b-v2.0:latest"))
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=512,
+        help="Maximum judge completion tokens for Azure OpenAI.",
+    )
     parser.add_argument("--max-evidence-chars", type=int, default=6000)
     parser.add_argument(
         "--no-evidence",
@@ -209,13 +274,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    host = os.environ.get("OLLAMA_HOST")
-    ollama_kwargs = {"host": host} if host else {}
-    judge = OllamaLLM(
-        model_name=args.judge_model,
-        model_params={"options": {"temperature": 0}},
-        **ollama_kwargs,
-    )
+    if args.llm_as_judge == "ollama":
+        judge = _build_ollama_judge(args.judge_model)
+        judge_model = args.judge_model
+    else:
+        judge = _build_azure_openai_judge()
+        judge_model = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
 
     rows = _load_rows(args.input)
     selected_ids = set(args.question_id)
@@ -252,7 +316,8 @@ def main() -> None:
                 "pass": False,
                 "rationale": "Candidate answer is missing.",
                 "raw": None,
-                "model": args.judge_model,
+                "model": judge_model,
+                "judge_backend": args.llm_as_judge,
             }
             _save_rows(args.output, rows)
             continue
@@ -265,14 +330,20 @@ def main() -> None:
             evidence=evidence,
         )
         try:
-            raw = judge.invoke(prompt).content
+            raw = _invoke_judge(
+                judge=judge,
+                prompt=prompt,
+                llm_as_judge=args.llm_as_judge,
+                max_tokens=args.max_tokens,
+            )
             score = _parse_prometheus_score(raw)
             row["llm_judge"] = {
                 "score": score,
                 "pass": bool(score is not None and score >= 4),
                 "rationale": _extract_rationale(raw),
                 "raw": raw,
-                "model": args.judge_model,
+                "model": judge_model,
+                "judge_backend": args.llm_as_judge,
             }
             print(f"  score={score} pass={row['llm_judge']['pass']}")
         except Exception as exc:
@@ -281,7 +352,8 @@ def main() -> None:
                 "pass": None,
                 "rationale": str(exc),
                 "raw": None,
-                "model": args.judge_model,
+                "model": judge_model,
+                "judge_backend": args.llm_as_judge,
             }
             print(f"  error={exc}")
 
