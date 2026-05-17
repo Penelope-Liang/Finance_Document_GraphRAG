@@ -11,7 +11,7 @@ from typing import Any
 
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
-from neo4j_graphrag.llm import OllamaLLM
+from neo4j_graphrag.llm import AzureOpenAILLM, OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
 from neo4j_graphrag.retrievers import (
     HybridCypherRetriever,
@@ -382,6 +382,29 @@ def _require_env(name: str) -> str:
     if not value:
         raise SystemExit(f"Missing env var: {name}")
     return value
+
+
+def _build_answer_llm(
+    *,
+    backend: str,
+    ollama_model: str,
+    ollama_host: str | None,
+) -> Any:
+    if backend == "azure-openai":
+        return AzureOpenAILLM(
+            model_name=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+            model_params={"temperature": 0},
+            azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
+            api_key=_require_env("AZURE_OPENAI_API_KEY"),
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+        )
+
+    ollama_kwargs = {"host": ollama_host} if ollama_host else {}
+    return OllamaLLM(
+        model_name=ollama_model,
+        model_params={"options": {"temperature": 0}},
+        **ollama_kwargs,
+    )
 
 
 def _load_questions(path: Path) -> list[dict]:
@@ -2324,6 +2347,17 @@ def main() -> None:
         default=1.5,
         help="Base seconds between retryable LLM errors (scaled by attempt; NaN/encode errors wait longer).",
     )
+    parser.add_argument(
+        "--llm-backend",
+        choices=["ollama", "azure-openai"],
+        default=os.environ.get("LLM_BACKEND", "ollama"),
+        help="Answer-generation LLM backend. Defaults to local Ollama; use azure-openai for Azure OpenAI API.",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=os.environ.get("OLLAMA_LLM_MODEL", "qwen3:30b-a3b"),
+        help="Ollama answer model when --llm-backend=ollama.",
+    )
     args = parser.parse_args()
 
     uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
@@ -2332,7 +2366,6 @@ def main() -> None:
     database = os.environ.get("NEO4J_DATABASE")
     vector_index = os.environ.get("NEO4J_VECTOR_INDEX", "chunk_embedding_index")
     fulltext_index = os.environ.get("NEO4J_FULLTEXT_INDEX", "chunk_fulltext_index")
-    llm_model = os.environ.get("OLLAMA_LLM_MODEL", "qwen3:30b-a3b")
     embedding_model = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3:latest")
     ollama_host = os.environ.get("OLLAMA_HOST")
 
@@ -2343,10 +2376,10 @@ def main() -> None:
     questions = _load_questions(Path(args.questions_path))
     if args.max_questions > 0:
         questions = questions[: args.max_questions]
-    llm = OllamaLLM(
-        model_name=llm_model,
-        model_params={"options": {"temperature": 0}},
-        **ollama_kwargs,
+    llm = _build_answer_llm(
+        backend=args.llm_backend,
+        ollama_model=args.llm_model,
+        ollama_host=ollama_host,
     )
     judge_llm = OllamaLLM(
         model_name=args.llm_judge_model,

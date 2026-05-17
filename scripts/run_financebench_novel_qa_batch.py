@@ -11,7 +11,7 @@ from typing import Any
 
 import neo4j
 from neo4j_graphrag.embeddings import OllamaEmbeddings
-from neo4j_graphrag.llm import OllamaLLM
+from neo4j_graphrag.llm import AzureOpenAILLM, OllamaLLM
 from neo4j_graphrag.retrievers import HybridCypherRetriever
 from neo4j_graphrag.types import RetrieverResult, RetrieverResultItem
 
@@ -127,6 +127,29 @@ def _require_env(name: str) -> str:
     if not value:
         raise SystemExit(f"Missing env var: {name}")
     return value
+
+
+def _build_answer_llm(
+    *,
+    backend: str,
+    ollama_model: str,
+    ollama_host: str | None,
+) -> Any:
+    if backend == "azure-openai":
+        return AzureOpenAILLM(
+            model_name=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+            model_params={"temperature": 0},
+            azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
+            api_key=_require_env("AZURE_OPENAI_API_KEY"),
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+        )
+
+    ollama_kwargs = {"host": ollama_host} if ollama_host else {}
+    return OllamaLLM(
+        model_name=ollama_model,
+        model_params={"options": {"temperature": 0}},
+        **ollama_kwargs,
+    )
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -385,7 +408,7 @@ Evidence available to candidate:
 """
 
 
-def _invoke_with_retries(llm: OllamaLLM, prompt: str, retries: int) -> str:
+def _invoke_with_retries(llm: Any, prompt: str, retries: int) -> str:
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -488,6 +511,12 @@ def main() -> None:
     parser.add_argument("--no-company-filter", action="store_true")
     parser.add_argument("--vector-index", default=os.environ.get("NEO4J_VECTOR_INDEX", "chunk_embedding_index"))
     parser.add_argument("--fulltext-index", default=os.environ.get("NEO4J_FULLTEXT_INDEX", "chunk_fulltext_index"))
+    parser.add_argument(
+        "--llm-backend",
+        choices=["ollama", "azure-openai"],
+        default=os.environ.get("LLM_BACKEND", "ollama"),
+        help="Answer-generation LLM backend. Defaults to local Ollama; use azure-openai for Azure OpenAI API.",
+    )
     parser.add_argument("--llm-model", default=os.environ.get("OLLAMA_LLM_MODEL", "qwen3.6:27b"))
     parser.add_argument("--judge-model", default=os.environ.get("OLLAMA_JUDGE_MODEL", "vicgalle/prometheus-7b-v2.0"))
     parser.add_argument("--embed-model", default=os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3:latest"))
@@ -507,10 +536,10 @@ def main() -> None:
         rows = rows[: args.max_questions]
 
     embedder = OllamaEmbeddings(model=args.embed_model, **ollama_kwargs)
-    llm = OllamaLLM(
-        model_name=args.llm_model,
-        model_params={"options": {"temperature": 0}},
-        **ollama_kwargs,
+    llm = _build_answer_llm(
+        backend=args.llm_backend,
+        ollama_model=args.llm_model,
+        ollama_host=ollama_host,
     )
     judge_llm = OllamaLLM(
         model_name=args.judge_model,
