@@ -140,6 +140,7 @@ def _judge_prompt(
     question: str,
     response: Any,
     reference_answer: Any,
+    reference_justification: Any = None,
     evidence: str = "",
 ) -> str:
     evidence_section = ""
@@ -151,19 +152,50 @@ or explicit supporting evidence. Use evidence only to resolve ambiguity or detec
 {evidence}
 """
     return f"""###Task Description:
-You are evaluating FinanceBench answer correctness. Focus on good-faith financial substance:
-whether the response correctly answers the instruction compared with the reference answer.
-Do not require citations, evidence references, or reasoning steps. A concise answer is fully
-correct if it contains the correct financial fact, entity, direction, amount, or conclusion.
-Allow equivalent wording, common financial abbreviations, equivalent units, and minor rounding
-differences. Growth direction (positive/negative) must be correct.
+You are evaluating a FinanceBench answer. You are given an instruction/question,
+a candidate response, a reference answer, and optionally a reference justification.
 
-Penalize: wrong company, wrong period, wrong sign/direction, wrong entity, missing required
-answer components, hallucinated facts, answers contradicted by the reference answer, or correct
-numbers derived from explicitly wrong logic (if reasoning is provided).
+Judge whether the candidate response correctly answers the question in a good-faith
+financial sense. Focus on financial substance, not wording or formatting.
+
+First infer the answer type from the question:
+1. Direct extraction:
+   The question asks for a specific fact, entity, amount, date, filing item, segment, or line item.
+2. Numerical / calculation reasoning:
+   The question asks for a ratio, growth rate, margin, turnover, percentage change, comparison,
+   increase/decrease, or other computed result.
+3. Qualitative / logical finance judgment:
+   The question asks for business interpretation, financial health judgment, metric applicability,
+   trend explanation, risk explanation, or a yes/no conclusion based on financial evidence.
+4. Open-ended multi-step reasoning:
+   The question requires combining multiple facts across sections, periods, tables, or narrative disclosures.
+
+Evaluation rules:
+- Do not require citations, evidence references, or full calculation steps.
+- A concise answer can be fully correct if it gives the correct final fact, amount, entity, direction, or conclusion.
+- Allow equivalent wording, common financial abbreviations, equivalent units, and minor rounding differences.
+- For numerical/calculation questions, the sign, direction, unit scale, metric, and period must be correct.
+- For direct extraction questions, the requested entity/fact/amount must match the reference.
+- For qualitative/logical questions, accept different wording or a different-but-valid explanation if the conclusion is consistent with the reference answer and not contradicted by it.
+- For open-ended questions, the response must cover the main required components; missing important components should reduce the score.
+- If the candidate includes extra reasoning, do not penalize it unless it contradicts the reference answer or changes the conclusion.
+- If the reference justification is provided, use it only to clarify the reference answer; do not require identical wording.
+
+Common failure cases:
+- wrong company
+- wrong fiscal year, quarter, period, or filing
+- wrong sign or direction of change
+- wrong entity, segment, metric, or line item
+- amount off by a large order of magnitude
+- missing a required component of a multi-part question
+- answer is unsupported by or contradicted by the reference answer
+- candidate says it cannot answer when the reference answer provides the answer
 
 ###Reference Answer:
 {reference_answer}
+
+###Reference Justification:
+{reference_justification or "N/A"}
 
 ###Instruction:
 {question}
@@ -172,11 +204,11 @@ numbers derived from explicitly wrong logic (if reasoning is provided).
 {response}
 {evidence_section}
 ###Score Rubric:
-5: Semantically equivalent to the reference; concise is acceptable; allows different but valid qualitative interpretations if supported by evidence.
-4: Correct financial substance with minor unit/rounding/formatting/wording differences.
-3: Partially correct but missing an important required answer component.
-2: Helpful refusal (explicitly states inability to answer due to missing data or access).
-1: Factually incorrect, hallucinated, wrong direction/sign, contradicted by reference, or correct number with explicitly contradictory logic.
+5: Fully correct in financial substance. Equivalent wording, equivalent units, concise answers, and minor rounding differences are acceptable.
+4: Mostly correct; the main answer is correct but there is a minor omission, minor imprecision, or non-critical extra detail.
+3: Partially correct; contains some correct relevant information but misses an important required component or has a notable but not fatal error.
+2: Mostly incorrect; only a small part is relevant/correct, or it refuses/claims missing information despite the reference answer being available.
+1: Incorrect, hallucinated, wrong company/period/entity/metric, wrong direction/sign, contradicted by the reference, or missing candidate answer.
 
 You must output exactly this format:
 ###Rationale:
@@ -307,6 +339,11 @@ def main() -> None:
 
         answer = row.get("answer")
         reference_answer = row.get("gold_answer") or row.get("reference_answer")
+        reference_justification = (
+            row.get("gold_justification")
+            or row.get("justification")
+            or row.get("reference_justification")
+        )
         question = row.get("question")
         print(f"[{idx}/{total}] {row.get('question_id')} answer={answer!r}")
 
@@ -327,6 +364,7 @@ def main() -> None:
             question=str(question or ""),
             response=answer,
             reference_answer=reference_answer,
+            reference_justification=reference_justification,
             evidence=evidence,
         )
         try:
