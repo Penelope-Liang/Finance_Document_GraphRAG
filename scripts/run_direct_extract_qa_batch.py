@@ -1282,8 +1282,7 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
 
 _METRICS_TABLE_CELL_QUERY = """
 UNWIND $targets AS target
-CALL {
-    WITH target
+CALL (target) {
     MATCH (ch:Chunk)-[:HAS_TABLE]->(t:Table)-[:HAS_CELL]->(cell:TableCell)
     WITH target, ch, t, cell,
          toLower(coalesce(cell.row_header, "")) AS row_text,
