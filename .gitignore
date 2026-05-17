@@ -22,3 +22,6 @@ batch_results.json
 *.log
 output/
 third_party_unstructured_src/
+
+# Archived code (kept locally but not tracked)
+_archive/
