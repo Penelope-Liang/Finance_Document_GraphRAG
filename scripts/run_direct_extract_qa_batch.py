@@ -27,6 +27,11 @@ from neo4j_graphrag.tools.batch_ask import (
     TEXT2CYPHER_PROMPT,
 )
 
+from financebench_pipeline.routing import (
+    classify_question_style_auto as _classify_question_style_auto,
+    classify_question_style_llm as _classify_question_style_llm,
+)
+
 
 try:
     import numpy as np
@@ -414,7 +419,14 @@ def _load_questions(path: Path) -> list[dict]:
             raw = line.strip()
             if not raw:
                 continue
-            rows.append(json.loads(raw))
+            row = json.loads(raw)
+            doc_name = row.get("doc_name") or str(row.get("doc_id") or "").removesuffix(".pdf")
+            row["doc_name"] = doc_name
+            row["doc_id"] = row.get("doc_id") or (f"{doc_name}.pdf" if doc_name else None)
+            row["question_id"] = row.get("question_id") or row.get("financebench_id") or row.get("id")
+            row["gold_answer"] = row.get("gold_answer") or row.get("answer")
+            row["gold_justification"] = row.get("gold_justification") or row.get("justification")
+            rows.append(row)
     return rows
 
 
@@ -486,6 +498,13 @@ def _strip_think(text: str) -> str:
 
 
 def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
+    payload = _parse_answer_payload(raw_answer)
+    if isinstance(payload, dict):
+        return payload.get("answer"), payload.get("evidence")
+    return raw_answer, None
+
+
+def _parse_answer_payload(raw_answer: str) -> dict[str, Any] | None:
     cleaned = _strip_think(raw_answer)
     # First try parsing the cleaned text directly
     try:
@@ -497,12 +516,10 @@ def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
             try:
                 payload = json.loads(json_str)
             except json.JSONDecodeError:
-                return raw_answer, None
+                return None
         else:
-            return raw_answer, None
-    if isinstance(payload, dict):
-        return payload.get("answer"), payload.get("evidence")
-    return raw_answer, None
+            return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -510,40 +527,6 @@ def _extract_json_object(text: str) -> str | None:
     cleaned = _strip_think(text)
     match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
     return match.group(0) if match else None
-
-
-ROUTER_PROMPT = """You are routing FinanceBench questions into exactly one QA pipeline.
-
-Choose exactly one label:
-
-direct
-- The question asks for one specific fact, entity, date, filing item, financial line item, or raw amount.
-- No ratio, formula, percentage change, trend judgment, or multi-step business explanation is required.
-
-calculation
-- The question asks for a computed metric, ratio, margin, turnover, growth rate, percentage, year-over-year change, comparison, increase/decrease, average, ROA/ROE, quick ratio, current ratio, fixed asset turnover, free cash flow conversion, or formula-based answer.
-- This includes yes/no questions where the answer depends mainly on computing or comparing financial values.
-
-domain
-- The question asks for finance/business judgment, financial health, metric applicability, capital intensity, liquidity profile, margin profile, risk, trend explanation, business meaning, whether a metric is useful/meaningful, what drove a change, or why something happened.
-- These questions may require calculations, but the final answer is a business/financial interpretation or judgment.
-
-novel
-- The question is open-ended, multi-step, or cross-section reasoning not mainly a standard financial metric calculation.
-- It may ask about policies, filings, governance, derivatives, customer retention, strategic events, acquisitions, business segments, or other document-specific reasoning.
-
-Priority rules:
-- If the question asks for metric applicability or business interpretation after a calculation, choose domain, not calculation.
-- If it asks only for a formula result or numeric comparison, choose calculation.
-- If it asks only for one fact or raw value, choose direct.
-- If none of the above clearly fits and the question requires broad document reasoning, choose novel.
-
-Return JSON only:
-{{"label": "direct|calculation|domain|novel", "reason": "short reason"}}
-
-Question:
-{question}
-"""
 
 
 _MONTH_NAMES = (
@@ -707,9 +690,45 @@ def _build_novel_answer_guidance(question: str) -> str:
     return "\n".join(lines)
 
 
+def _build_domain_answer_guidance(question: str) -> str:
+    constraints = _extract_question_constraints(question)
+    lines = [
+        "Domain-relevant FinanceBench guidance:",
+        "- Use retrieved evidence as the only source of truth; do not use outside knowledge.",
+        "- Return JSON only with keys 'answer', 'evidence', and 'missing_information'.",
+        "- The answer field should be concise: 1-3 sentences. Include the final conclusion and essential explanation if needed.",
+        "- For yes/no finance judgment questions, start the answer with a clear 'Yes' or 'No', then explain briefly.",
+        "- Put formulas, raw input values, calculations, and detailed justification in evidence.",
+        "- For finance judgment questions, do not answer only based on the company type, industry, or large dollar amounts.",
+        "- First find the relevant numbers in the evidence, calculate the needed ratios, and then make the judgment.",
+        "- If the ratios point to a different conclusion than the company type or industry, follow the ratios.",
+        "- If the evidence does not contain the required numbers, set answer=null and explain missing_information instead of making an industry-based judgment.",
+        "- If the question asks for a ratio, margin, turnover, growth, liquidity, ROA, CAPEX intensity, or comparison, identify the required inputs and compute the result.",
+        "- If the question asks whether a metric is useful or meaningful, first judge applicability from the evidence and company context, then answer or explain why not.",
+        "- If the question asks what drove a change, identify the direction and the main drivers from evidence.",
+        "- If the question asks direct information extraction, return the requested fact without unnecessary explanation.",
+        "- Respect company, fiscal year, quarter, period, filing, section, and segment constraints; do not mix periods or companies.",
+        "- If required inputs are missing or ambiguous, set answer=null and explain missing_information instead of guessing.",
+        "- evidence may be null only when no separate formula/justification is needed.",
+    ]
+    if constraints["section_hints"]:
+        lines.append(f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}")
+    if constraints["years"]:
+        lines.append(f"- Extracted years: {', '.join(constraints['years'])}")
+    if constraints["quarters"]:
+        lines.append(f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
+    if constraints["months"]:
+        lines.append(f"- Extracted months/dates context: {', '.join(constraints['months'])}")
+    if constraints["period_hints"]:
+        lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
+    return "\n".join(lines)
+
+
 def _build_answer_guidance(question: str, question_style: str) -> str:
     if question_style == "calculation":
         return _build_calculation_answer_guidance(question)
+    if question_style == "domain":
+        return _build_domain_answer_guidance(question)
     if question_style == "novel":
         return _build_novel_answer_guidance(question)
     return _build_direct_extract_answer_guidance(question)
@@ -718,6 +737,8 @@ def _build_answer_guidance(question: str, question_style: str) -> str:
 def _select_text2cypher_examples(question_style: str) -> list[str]:
     if question_style == "calculation":
         return TEXT2CYPHER_EXAMPLES_CALCULATION
+    if question_style == "domain":
+        return TEXT2CYPHER_EXAMPLES_CALCULATION + TEXT2CYPHER_EXAMPLES_NOVEL
     if question_style == "novel":
         return TEXT2CYPHER_EXAMPLES_NOVEL
     return TEXT2CYPHER_EXAMPLES
@@ -726,102 +747,11 @@ def _select_text2cypher_examples(question_style: str) -> list[str]:
 def _select_text2cypher_prompt(question_style: str) -> str:
     if question_style == "calculation":
         return TEXT2CYPHER_PROMPT_CALCULATION
+    if question_style == "domain":
+        return TEXT2CYPHER_PROMPT_NOVEL
     if question_style == "novel":
         return TEXT2CYPHER_PROMPT_NOVEL
     return TEXT2CYPHER_PROMPT
-
-
-def _classify_question_style_auto(question: str) -> tuple[str, float, str]:
-    """Rule-only router: metrics-calculation vs direct single-value extraction.
-
-    Returns (effective_style, confidence in [0,1], short reason for logging / results JSON).
-    LLM fallback can be added later for ambiguous cases.
-    """
-    q = (question or "").lower()
-    hits: list[str] = []
-
-    def hit(tag: str) -> None:
-        if tag not in hits:
-            hits.append(tag)
-
-    if "defined as" in q:
-        hit("defined_as")
-    if "cagr" in q:
-        hit("cagr")
-    if re.search(r"\byoy\b", q) or "year-over-year" in q or "year over year" in q:
-        hit("yoy")
-    if re.search(r"\bratio\b", q):
-        hit("ratio")
-    if re.search(r"\bmargins?\b", q):
-        hit("margin")
-    if re.search(r"\baverage\b", q):
-        hit("average")
-    if re.search(r"\bgrowth\b", q):
-        hit("growth")
-    if re.search(r"\bturnover\b", q):
-        hit("turnover")
-    if re.search(r"\bdpo\b", q) or re.search(r"\bccc\b", q):
-        hit("dpo_ccc")
-    if re.search(r"\broa\b", q) or "return on assets" in q or "return on asset" in q:
-        hit("roa")
-    if "% of revenue" in q or "percent of revenue" in q or "percentage of revenue" in q:
-        hit("pct_of_revenue")
-    if re.search(r"between\s+fy", q):
-        hit("between_fy")
-    if re.search(r"fy\s*\d{4}\s*[-–]\s*fy\s*\d{4}", q):
-        hit("multi_fy_dash")
-    if re.search(r"from\s+fy\s*\d{4}\s+to\s+fy\s*\d{4}", q):
-        hit("from_fy_to_fy")
-    if "/" in q and ("average" in q or "pp&e" in q or "ppe" in q):
-        hit("slash_formula")
-
-    if hits:
-        conf = min(0.98, 0.72 + 0.06 * len(hits))
-        return "calculation", conf, "matched: " + ", ".join(hits)
-    return "direct", 0.88, "no_calculation_heuristics; default_direct"
-
-
-def _parse_router_label(raw: str | None) -> tuple[str | None, str | None]:
-    if not raw:
-        return None, None
-
-    cleaned = _strip_think(raw)
-    payload_text = _extract_json_object(cleaned) or cleaned
-    try:
-        payload = json.loads(payload_text)
-    except json.JSONDecodeError:
-        payload = None
-
-    if isinstance(payload, dict):
-        label = str(payload.get("label") or payload.get("route") or "").strip().lower()
-        reason = payload.get("reason")
-        if label in {"direct", "calculation", "domain", "novel"}:
-            return label, str(reason) if reason is not None else None
-
-    match = re.search(r"\b(direct|calculation|domain|novel)\b", cleaned.lower())
-    return (match.group(1), None) if match else (None, None)
-
-
-def _map_router_label_to_question_style(label: str | None) -> str | None:
-    if label in {"direct", "calculation", "novel"}:
-        return label
-    if label == "domain":
-        # The existing generic QA path for non-template FinanceBench questions is "novel".
-        return "novel"
-    return None
-
-
-def _classify_question_style_llm(llm: Any, question: str) -> tuple[str, float, str, str | None]:
-    prompt = ROUTER_PROMPT.format(question=question)
-    raw = llm.invoke(prompt).content
-    label, reason = _parse_router_label(raw)
-    effective_style = _map_router_label_to_question_style(label)
-    if effective_style is None:
-        fallback_style, fallback_conf, fallback_reason = _classify_question_style_auto(question)
-        return fallback_style, fallback_conf, f"llm_parse_failed; fallback={fallback_reason}", raw
-
-    mapped_note = "" if label == effective_style else f"; mapped {label}->" + effective_style
-    return effective_style, 1.0, f"llm_router={label}{mapped_note}; {reason or 'no_reason'}", raw
 
 
 _DOC_PREFIX_TO_COMPANY_NAME = {
@@ -1047,8 +977,8 @@ def _rewrite_metrics_query_for_retrieval(
         # Fall back to the original question if no derived metric was recognized.
         components.append(question)
 
-    if question_style == "novel":
-        operation = "open_ended"
+    if question_style in {"novel", "domain"}:
+        operation = "open_ended" if question_style == "novel" else "domain_relevant"
         if "segment" in clean or "business segment" in clean:
             add_component("business segment")
             add_component("segment sales")
@@ -1078,6 +1008,42 @@ def _rewrite_metrics_query_for_retrieval(
             add_component("card members")
             add_component("retention")
             add_component("customer engagement")
+        if question_style == "domain":
+            if any(token in clean for token in ("useful", "meaningful", "relevant", "not something", "not useful")):
+                add_component("metric applicability")
+                add_component("business model")
+                add_component("industry context")
+                add_statement("business")
+                add_statement("management discussion")
+            if any(token in clean for token in ("drove", "driver", "driving", "due to", "primarily due", "change")):
+                add_component("drivers")
+                add_component("margin change")
+                add_component("operating margin")
+                add_component("gross margin")
+                add_statement("management discussion and analysis")
+            if "quick ratio" in clean or "liquidity" in clean:
+                add_component("cash and cash equivalents")
+                add_component("accounts receivable")
+                add_component("inventories")
+                add_component("total current assets")
+                add_component("total current liabilities")
+                add_statement("consolidated balance sheet")
+                add_statement("liquidity")
+            if "capital-intensive" in clean or "capital intensive" in clean or "capex" in clean:
+                add_component("capital expenditures")
+                add_component("property plant and equipment")
+                add_component("total assets")
+                add_component("return on assets")
+                add_statement("cash flows")
+                add_statement("balance sheet")
+                add_statement("statement of operations")
+            if "stable" in clean or "trend" in clean:
+                add_component("trend")
+                add_component("multi-period comparison")
+            if "industry" in clean or "primarily operate" in clean:
+                add_component("industry")
+                add_component("business overview")
+                add_statement("business")
 
     statement_text = "; ".join(statements)
     component_text = "; ".join(components)
@@ -1548,7 +1514,7 @@ class StyleRoutingText2CypherRetriever(Retriever):
     def search(self, query_text: str, t2c_style: str = "direct", **kwargs: Any) -> RetrieverResult:
         if t2c_style == "calculation":
             inner = self._calc
-        elif t2c_style == "novel":
+        elif t2c_style in {"novel", "domain"}:
             inner = self._novel
         else:
             inner = self._direct
@@ -2241,7 +2207,7 @@ class DualRetriever(Retriever):
                 plan=metrics_plan,
             )
             if self.metrics_retriever is not None
-            and t2c_style == "calculation"
+            and t2c_style in {"calculation", "domain"}
             and metrics_plan is not None
             else RetrieverResult(items=[], metadata={"__retriever": "MetricsTableCellRetriever", "matched": False})
         )
@@ -2340,11 +2306,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--question-style",
-        choices=["direct", "calculation", "novel", "auto", "llm-auto"],
+        choices=["direct", "calculation", "domain", "novel", "auto", "llm-auto"],
         default="direct",
         help=(
-            "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), novel (open-ended), "
-            "auto (rule-based classification per question), or llm-auto (LLM router per question; "
+            "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), "
+            "domain (finance judgment), novel (open-ended), auto (rule-based classification per question), "
+            "or llm-auto (LLM router per question; "
             "see question_style_* in output JSON)."
         ),
     )
@@ -2658,7 +2625,7 @@ def main() -> None:
                             "company_doc_key": (
                                 query_rewrite_plan["company_doc_key"]
                                 if args.use_query_rewrite
-                                and effective_style == "novel"
+                                and effective_style in {"novel", "domain"}
                                 and not args.restrict_doc_id
                                 else None
                             ),
@@ -2670,7 +2637,7 @@ def main() -> None:
                         retriever_config["retrieval_query_text"] = query_rewrite_plan[
                             "rewritten_query"
                         ]
-                        if effective_style == "calculation":
+                        if effective_style in {"calculation", "domain"}:
                             if args.metrics_table_no_filter:
                                 retriever_config["metrics_doc_id"] = None
                                 retriever_config["metrics_company_doc_key"] = None
@@ -2695,7 +2662,14 @@ def main() -> None:
                     **search_kwargs,
                 )
                 raw_answer = result.answer
-                answer, evidence = _parse_answer(raw_answer)
+                answer_payload = _parse_answer_payload(raw_answer)
+                if answer_payload is not None:
+                    answer = answer_payload.get("answer")
+                    evidence = answer_payload.get("evidence")
+                    missing_information = answer_payload.get("missing_information")
+                else:
+                    answer, evidence = raw_answer, None
+                    missing_information = None
                 retriever_result_dump = (
                     _sanitize_for_json(result.retriever_result.model_dump())
                     if result.retriever_result is not None
@@ -2709,8 +2683,10 @@ def main() -> None:
                         "doc_name": row["doc_name"],
                         "question": row["question"],
                         "gold_answer": row["gold_answer"],
+                        "gold_justification": row.get("gold_justification"),
                         "answer": answer,
                         "evidence": evidence,
+                        "missing_information": missing_information,
                         "raw_answer": raw_answer,
                         "retriever_result": retriever_result_dump,
                         "time_seconds": elapsed,
@@ -2730,8 +2706,10 @@ def main() -> None:
                         "doc_name": row["doc_name"],
                         "question": row["question"],
                         "gold_answer": row["gold_answer"],
+                        "gold_justification": row.get("gold_justification"),
                         "answer": None,
                         "evidence": None,
+                        "missing_information": None,
                         "raw_answer": None,
                         "retriever_result": None,
                         "time_seconds": elapsed,
