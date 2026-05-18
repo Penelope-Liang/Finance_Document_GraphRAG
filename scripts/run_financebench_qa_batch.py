@@ -2523,10 +2523,11 @@ def main() -> None:
             )
             if args.use_query_rewrite:
                 print(f"  retrieval_query={query_rewrite_plan['rewritten_query']}", flush=True)
+            retrieval_query_text = query_rewrite_plan["rewritten_query"]
             start = time.time()
             try:
                 search_kwargs = {
-                    "query_text": question_text,
+                    "query_text": retrieval_query_text,
                     "return_context": True,
                     "examples": _build_answer_prompt(row["question"], effective_style),
                 }
@@ -2548,9 +2549,7 @@ def main() -> None:
                 if args.retriever_mode == "dual":
                     retriever_config["t2c_style"] = effective_style
                     if args.use_query_rewrite:
-                        retriever_config["retrieval_query_text"] = query_rewrite_plan[
-                            "rewritten_query"
-                        ]
+                        retriever_config["retrieval_query_text"] = retrieval_query_text
                         if effective_style in {"calculation", "domain"}:
                             if args.metrics_table_no_filter:
                                 retriever_config["metrics_doc_id"] = None
