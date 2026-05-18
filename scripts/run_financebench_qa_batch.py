@@ -2185,6 +2185,17 @@ class DualRetriever(Retriever):
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
         raise NotImplementedError("DualRetriever uses a custom search implementation.")
 
+    @staticmethod
+    def _failed_result(retriever_name: str, exc: Exception) -> RetrieverResult:
+        return RetrieverResult(
+            items=[],
+            metadata={
+                "__retriever": retriever_name,
+                "matched": False,
+                "error": str(exc),
+            },
+        )
+
     def search(
         self,
         query_text: str,
@@ -2198,37 +2209,61 @@ class DualRetriever(Retriever):
         metrics_plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         search_text = retrieval_query_text or query_text
-        metrics_result = (
-            self.metrics_retriever.search(
-                query_text=query_text,
-                doc_id=metrics_doc_id,
-                company_doc_key=metrics_company_doc_key,
-                years=list((metrics_plan or {}).get("years") or []),
-                plan=metrics_plan,
+        try:
+            metrics_result = (
+                self.metrics_retriever.search(
+                    query_text=query_text,
+                    doc_id=metrics_doc_id,
+                    company_doc_key=metrics_company_doc_key,
+                    years=list((metrics_plan or {}).get("years") or []),
+                    plan=metrics_plan,
+                )
+                if self.metrics_retriever is not None
+                and t2c_style in {"calculation", "domain"}
+                and metrics_plan is not None
+                else RetrieverResult(
+                    items=[],
+                    metadata={"__retriever": "MetricsTableCellRetriever", "matched": False},
+                )
             )
-            if self.metrics_retriever is not None
-            and t2c_style in {"calculation", "domain"}
-            and metrics_plan is not None
-            else RetrieverResult(items=[], metadata={"__retriever": "MetricsTableCellRetriever", "matched": False})
-        )
+        except Exception as exc:
+            metrics_result = self._failed_result("MetricsTableCellRetriever", exc)
         metrics_result = _sanitize_retriever_result(metrics_result)
-        chunk_result = _sanitize_retriever_result(self.chunk_retriever.search(
-            query_text=search_text,
-            top_k=top_k,
-            effective_search_ratio=effective_search_ratio,
-            query_params=query_params,
-        ))
-        if isinstance(self.table_retriever, StyleRoutingText2CypherRetriever):
-            table_result = _sanitize_retriever_result(self.table_retriever.search(
-                query_text=search_text, t2c_style=t2c_style
-            ))
-        else:
-            table_result = _sanitize_retriever_result(self.table_retriever.search(query_text=search_text))
-        primary_result = (
-            _sanitize_retriever_result(self.primary_retriever.search(query_text=search_text, query_params=query_params))
-            if self.primary_retriever is not None
-            else RetrieverResult(items=[], metadata={"__retriever": "PrimaryStatementRetriever", "matched": False})
-        )
+
+        try:
+            chunk_result = self.chunk_retriever.search(
+                query_text=search_text,
+                top_k=top_k,
+                effective_search_ratio=effective_search_ratio,
+                query_params=query_params,
+            )
+        except Exception as exc:
+            chunk_result = self._failed_result("HybridCypherRetriever", exc)
+        chunk_result = _sanitize_retriever_result(chunk_result)
+
+        try:
+            if isinstance(self.table_retriever, StyleRoutingText2CypherRetriever):
+                table_result = self.table_retriever.search(
+                    query_text=search_text, t2c_style=t2c_style
+                )
+            else:
+                table_result = self.table_retriever.search(query_text=search_text)
+        except Exception as exc:
+            table_result = self._failed_result("Text2CypherRetriever", exc)
+        table_result = _sanitize_retriever_result(table_result)
+
+        try:
+            primary_result = (
+                self.primary_retriever.search(query_text=search_text, query_params=query_params)
+                if self.primary_retriever is not None
+                else RetrieverResult(
+                    items=[],
+                    metadata={"__retriever": "PrimaryStatementRetriever", "matched": False},
+                )
+            )
+        except Exception as exc:
+            primary_result = self._failed_result("PrimaryStatementRetriever", exc)
+        primary_result = _sanitize_retriever_result(primary_result)
 
         items: list[RetrieverResultItem] = []
         seen_contents: set[str] = set()
