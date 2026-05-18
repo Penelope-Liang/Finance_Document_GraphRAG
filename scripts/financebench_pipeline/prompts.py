@@ -4,24 +4,33 @@ import re
 from typing import Any
 
 
-_MONTH_NAMES = (
-    "january",
-    "february",
-    "march",
-    "april",
-    "may",
-    "june",
-    "july",
-    "august",
-    "september",
-    "october",
-    "november",
-    "december",
-)
+_MONTH_ALIASES = {
+    "january": ("january", "jan", "jan."),
+    "february": ("february", "feb", "feb."),
+    "march": ("march", "mar", "mar."),
+    "april": ("april", "apr", "apr."),
+    "may": ("may",),
+    "june": ("june", "jun", "jun."),
+    "july": ("july", "jul", "jul."),
+    "august": ("august", "aug", "aug."),
+    "september": ("september", "sept", "sept.", "sep", "sep."),
+    "october": ("october", "oct", "oct."),
+    "november": ("november", "nov", "nov."),
+    "december": ("december", "dec", "dec."),
+}
 
 
 def normalize_text(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
+
+
+def extract_months(text: str) -> list[str]:
+    clean = normalize_text(text)
+    month_hits = []
+    for month, aliases in _MONTH_ALIASES.items():
+        if any(re.search(rf"\b{re.escape(alias)}\b", clean) for alias in aliases):
+            month_hits.append(month)
+    return month_hits
 
 
 def extract_question_constraints(question: str) -> dict[str, Any]:
@@ -29,7 +38,7 @@ def extract_question_constraints(question: str) -> dict[str, Any]:
 
     years = sorted(set(re.findall(r"\b(?:fy)?((?:19|20)\d{2})\b", clean)))
     quarter_match = re.findall(r"\bq([1-4])\b", clean)
-    month_hits = [month for month in _MONTH_NAMES if month in clean]
+    month_hits = extract_months(question)
     period_hints = [
         hint
         for hint in (
