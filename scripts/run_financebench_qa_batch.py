@@ -1927,9 +1927,31 @@ def _extract_doc_id(query_text: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _build_retrieval_filter(
+    *,
+    row: dict[str, Any],
+    query_rewrite_plan: dict[str, Any],
+    use_query_rewrite: bool,
+    restrict_doc_id: bool,
+) -> dict[str, str | None]:
+    """Shared document/company constraints for every retrieval branch."""
+    if restrict_doc_id:
+        return {
+            "doc_id": str(row["doc_id"]),
+            "company_doc_key": None,
+        }
+    return {
+        "doc_id": None,
+        "company_doc_key": (
+            query_rewrite_plan.get("company_doc_key") if use_query_rewrite else None
+        ),
+    }
+
+
 _PRIMARY_STATEMENT_QUERY = """
 MATCH (chunk:Chunk)
 WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
+  AND ($company_doc_key IS NULL OR toLower(chunk.doc_id) STARTS WITH $company_doc_key)
   AND chunk.should_index = true
   AND (
     chunk.statement_type = $statement_type
@@ -1995,6 +2017,7 @@ class PrimaryStatementRetriever(Retriever):
     ) -> RetrieverResult:
         spec = _detect_statement_type(query_text)
         doc_id = (query_params or {}).get("doc_id") if query_params else None
+        company_doc_key = (query_params or {}).get("company_doc_key") if query_params else None
         if doc_id is None:
             doc_id = _extract_doc_id(query_text)
 
@@ -2010,6 +2033,7 @@ class PrimaryStatementRetriever(Retriever):
 
         params = {
             "doc_id": doc_id,
+            "company_doc_key": company_doc_key,
             "statement_type": spec["name"],
             "includes": list(spec["includes"]),
             "excludes": list(spec["excludes"]),
@@ -2039,6 +2063,9 @@ class PrimaryStatementRetriever(Retriever):
                 "matched": True,
                 "statement_type": spec["name"],
                 "doc_id": doc_id,
+                "doc_id_filter_applied": bool(doc_id),
+                "company_doc_key": company_doc_key,
+                "company_filter_applied": bool(company_doc_key),
                 "kept": len(items),
             },
         ))
@@ -2524,6 +2551,12 @@ def main() -> None:
             if args.use_query_rewrite:
                 print(f"  retrieval_query={query_rewrite_plan['rewritten_query']}", flush=True)
             retrieval_query_text = query_rewrite_plan["rewritten_query"]
+            retrieval_filter = _build_retrieval_filter(
+                row=row,
+                query_rewrite_plan=query_rewrite_plan,
+                use_query_rewrite=args.use_query_rewrite,
+                restrict_doc_id=args.restrict_doc_id,
+            )
             start = time.time()
             try:
                 search_kwargs = {
@@ -2536,15 +2569,7 @@ def main() -> None:
                     retriever_config = {
                         "top_k": args.top_k,
                         "effective_search_ratio": args.effective_search_ratio,
-                        "query_params": {
-                            "doc_id": row["doc_id"] if args.restrict_doc_id else None,
-                            "company_doc_key": (
-                                query_rewrite_plan["company_doc_key"]
-                                if args.use_query_rewrite
-                                and not args.restrict_doc_id
-                                else None
-                            ),
-                        },
+                        "query_params": retrieval_filter,
                     }
                 if args.retriever_mode == "dual":
                     retriever_config["t2c_style"] = effective_style
@@ -2556,11 +2581,11 @@ def main() -> None:
                                 retriever_config["metrics_company_doc_key"] = None
                             elif args.metrics_table_no_doc_id:
                                 retriever_config["metrics_doc_id"] = None
-                                retriever_config["metrics_company_doc_key"] = query_rewrite_plan[
+                                retriever_config["metrics_company_doc_key"] = retrieval_filter[
                                     "company_doc_key"
                                 ]
                             else:
-                                retriever_config["metrics_doc_id"] = row["doc_id"]
+                                retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
                                 retriever_config["metrics_company_doc_key"] = None
                             retriever_config["metrics_plan"] = query_rewrite_plan
                 elif args.retriever_mode == "text2cypher":
