@@ -129,13 +129,17 @@ def build_numerical_reasoning_prompt(question: str) -> str:
     lines = [
         "Numerical reasoning prompt:",
         "- This is a numerical reasoning question, not a direct single-value extraction question.",
+        "- The 'answer' field must contain the final computed result only, using the unit and rounding requested by the question.",
+        "- Do not put raw input values, a list of source numbers, or intermediate values in the 'answer' field.",
+        "- Put raw input values, formula, unit conversions, and intermediate arithmetic in the 'evidence' field.",
         "- First identify every required input value before answering.",
         "- Use only evidence that matches the question's requested statement, section/table hint, and time period.",
         "- For ratios, margins, averages, YoY changes, turnover, DPO, CCC, or CAGR, gather all required numerator/denominator or multi-period inputs before computing.",
+        "- If the required inputs are present, you must perform the calculation and return the computed final value; do not stop after listing the inputs.",
         "- Do not answer from a single value if the metric requires multiple inputs.",
         "- If multiple candidate values are available, prefer the exact statement and period match.",
         "- If any required input is missing or period alignment is ambiguous, return insufficient information instead of guessing.",
-        "- Keep the computation simple and explicit: identify inputs, apply the formula, then provide the final answer.",
+        "- Keep the computation simple and explicit in evidence: identify inputs, apply the formula, show the arithmetic, then provide only the final result in answer.",
         "- Return JSON with keys 'answer' and 'evidence'. In evidence, briefly name the rows/periods used in the calculation.",
     ]
     return _append_constraint_lines(lines, constraints)
