@@ -617,26 +617,6 @@ def _extract_question_constraints(question: str) -> dict[str, Any]:
     }
 
 
-def _select_text2cypher_examples(question_style: str) -> list[str]:
-    if question_style == "calculation":
-        return TEXT2CYPHER_EXAMPLES_CALCULATION
-    if question_style == "domain":
-        return TEXT2CYPHER_EXAMPLES_CALCULATION + TEXT2CYPHER_EXAMPLES_NOVEL
-    if question_style == "novel":
-        return TEXT2CYPHER_EXAMPLES_NOVEL
-    return TEXT2CYPHER_EXAMPLES
-
-
-def _select_text2cypher_prompt(question_style: str) -> str:
-    if question_style == "calculation":
-        return TEXT2CYPHER_PROMPT_CALCULATION
-    if question_style == "domain":
-        return TEXT2CYPHER_PROMPT_NOVEL
-    if question_style == "novel":
-        return TEXT2CYPHER_PROMPT_NOVEL
-    return TEXT2CYPHER_PROMPT
-
-
 _DOC_PREFIX_TO_COMPANY_NAME = {
     "ACTIVISIONBLIZZARD": "Activision Blizzard",
     "ADOBE": "Adobe",

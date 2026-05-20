@@ -121,6 +121,39 @@ def _extract_json_object(text: str) -> str | None:
     return None
 
 
+def _strip_json_line_comments(text: str) -> str:
+    """Remove // comments outside JSON strings."""
+    output: list[str] = []
+    index = 0
+    in_string = False
+    escape = False
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            output.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == "/" and index + 1 < len(text) and text[index + 1] == "/":
+            index += 2
+            while index < len(text) and text[index] not in "\r\n":
+                index += 1
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
 def _infer_round_to(question: str, fallback: int = 2) -> int:
     clean = question.lower()
     word_to_num = {
@@ -337,7 +370,7 @@ def run_calculation_pipeline(
         }
 
     try:
-        plan = json.loads(json_text)
+        plan = json.loads(_strip_json_line_comments(json_text))
         result = evaluate_formula_plan(plan, question=question)
         answer = format_calculation_answer(result)
     except Exception as exc:
