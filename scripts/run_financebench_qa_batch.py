@@ -32,6 +32,9 @@ from financebench_pipeline.routing import (
     classify_question_style_llm as _classify_question_style_llm,
 )
 from financebench_pipeline.prompts import build_answer_prompt as _build_answer_prompt
+from financebench_pipeline.calculation_executor import (
+    run_calculation_pipeline as _run_calculation_pipeline,
+)
 
 
 try:
@@ -1587,6 +1590,33 @@ def _format_judge_candidate(index: int, item: RetrieverResultItem, max_chars: in
     )
 
 
+def _compact_retriever_evidence(
+    retriever_result_dump: dict[str, Any] | None,
+    *,
+    max_items: int = 8,
+    max_chars_per_item: int = 1200,
+) -> str:
+    if not retriever_result_dump:
+        return ""
+    items = retriever_result_dump.get("items") or []
+    blocks: list[str] = []
+    for index, item in enumerate(items[:max_items], start=1):
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") or {}
+        content = str(item.get("content") or "")[:max_chars_per_item]
+        blocks.append(
+            "\n".join(
+                [
+                    f"[{index}] source={metadata.get('source')}",
+                    f"doc={metadata.get('doc_id')} section={metadata.get('section_name')}",
+                    content,
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
 def _judge_prompt(query_text: str, items: list[RetrieverResultItem], max_chars: int) -> str:
     constraints = _extract_question_constraints(query_text)
     candidates_text = "\n\n".join(
@@ -2345,6 +2375,19 @@ def main() -> None:
         default=os.environ.get("OLLAMA_LLM_MODEL", "qwen3:30b-a3b"),
         help="Ollama answer model when --llm-backend=ollama.",
     )
+    parser.add_argument(
+        "--use-calculation-executor",
+        action="store_true",
+        help=(
+            "For calculation questions only, ask a coder model for a JSON formula plan, "
+            "safely evaluate it, and write the computed result back to answer."
+        ),
+    )
+    parser.add_argument(
+        "--calculation-model",
+        default=os.environ.get("OLLAMA_CALC_MODEL", "qwen2.5-coder:14b-instruct"),
+        help="Ollama coder model used by --use-calculation-executor.",
+    )
     args = parser.parse_args()
 
     uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
@@ -2367,6 +2410,15 @@ def main() -> None:
         backend=args.llm_backend,
         ollama_model=args.llm_model,
         ollama_host=ollama_host,
+    )
+    calc_llm = (
+        OllamaLLM(
+            model_name=args.calculation_model,
+            model_params={"options": {"temperature": 0}},
+            **ollama_kwargs,
+        )
+        if args.use_calculation_executor
+        else None
     )
     judge_llm = OllamaLLM(
         model_name=args.llm_judge_model,
@@ -2613,6 +2665,37 @@ def main() -> None:
                     if result.retriever_result is not None
                     else None
                 )
+                llm_answer_before_calculation = None
+                calculation_executor = None
+                if (
+                    args.use_calculation_executor
+                    and effective_style == "calculation"
+                    and calc_llm is not None
+                ):
+                    llm_answer_before_calculation = answer
+                    calculation_evidence = "\n\n".join(
+                        part
+                        for part in (
+                            f"Current answer:\n{answer}" if answer is not None else "",
+                            f"Answer evidence:\n{evidence}" if evidence else "",
+                            _compact_retriever_evidence(retriever_result_dump),
+                        )
+                        if part
+                    )
+                    calculation_executor = _run_calculation_pipeline(
+                        llm=calc_llm,
+                        question=question_text,
+                        current_answer=answer,
+                        evidence=calculation_evidence,
+                    )
+                    if (
+                        calculation_executor.get("calculation_success")
+                        and calculation_executor.get("calculation_answer") is not None
+                    ):
+                        answer = calculation_executor["calculation_answer"]
+                        evidence = (
+                            f"{evidence}\n\n" if evidence else ""
+                        ) + "Calculation executor applied."
                 elapsed = round(time.time() - start, 2)
                 results.append(
                     {
@@ -2626,6 +2709,8 @@ def main() -> None:
                         "evidence": evidence,
                         "missing_information": missing_information,
                         "raw_answer": raw_answer,
+                        "llm_answer_before_calculation": llm_answer_before_calculation,
+                        "calculation_executor": calculation_executor,
                         "retriever_result": retriever_result_dump,
                         "time_seconds": elapsed,
                         "error": None,
