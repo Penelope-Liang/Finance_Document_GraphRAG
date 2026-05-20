@@ -20,11 +20,21 @@ Rules:
    defined in "inputs" and use +, -, *, /, **, parentheses, and round/abs/min/max.
 4. The formula must compute the final answer requested by the question, not just
    restate one input value.
-5. If the question asks for percents, set the formula to return the percent
-   value, e.g. 65.4, not 0.654.
-6. Use the rounding requested by the question. If not stated, use 2 decimals.
-7. If required values are missing or ambiguous, return success=false with a
+5. Use the rounding requested by the question. If not stated, use 2 decimals.
+6. If required values are missing or ambiguous, return success=false with a
    short error and do not invent values.
+
+CRITICAL unit rules:
+- unit="percent" ONLY when the question explicitly asks for "percent", "percentage",
+  "% margin", "% of revenue", or similar. Multiply by 100 in the formula.
+- unit="plain" for: ratio, turnover, ROA, ROE, current ratio, quick ratio, working
+  capital ratio, operating cash flow ratio, DPO, DSO, DIO, CCC, EPS, P/E, times
+  interest earned, debt-to-equity, asset turnover, fixed asset turnover, inventory
+  turnover, receivables turnover. These are dimensionless ratios, NOT percents.
+- If the question says "margin" or "as % of revenue/net sales", the denominator
+  MUST be revenue or net sales, and unit="percent". Formula: numerator / revenue * 100.
+- If monetary values have different scales (thousands vs millions vs billions),
+  normalize them to the same scale before computing.
 
 Return this schema:
 {{
@@ -129,9 +139,71 @@ def _infer_round_to(question: str, fallback: int = 2) -> int:
     return fallback
 
 
+_PLAIN_RATIO_KEYWORDS = frozenset({
+    "ratio",
+    "turnover",
+    "roa",
+    "roe",
+    "roi",
+    "eps",
+    "p/e",
+    "pe ratio",
+    "dpo",
+    "dso",
+    "dio",
+    "ccc",
+    "times interest",
+    "debt-to-equity",
+    "debt to equity",
+    "current ratio",
+    "quick ratio",
+    "working capital ratio",
+    "operating cash flow ratio",
+    "asset turnover",
+    "fixed asset turnover",
+    "inventory turnover",
+    "receivables turnover",
+})
+
+
+def _explicit_percent_request(question: str) -> bool:
+    clean = question.lower()
+    return (
+        "%" in clean
+        or "percent" in clean
+        or "percents" in clean
+        or "percentage" in clean
+    )
+
+
+def _is_margin_question(question: str) -> bool:
+    clean = question.lower()
+    return (
+        "margin" in clean
+        or "% of revenue" in clean
+        or "% of net sales" in clean
+        or "as a percent of revenue" in clean
+        or "as a percent of net sales" in clean
+        or "as a percentage of revenue" in clean
+        or "as a percentage of net sales" in clean
+    )
+
+
+def _is_plain_ratio_question(question: str) -> bool:
+    clean = question.lower()
+    if _explicit_percent_request(question) or _is_margin_question(question):
+        return False
+    for keyword in _PLAIN_RATIO_KEYWORDS:
+        if keyword in clean:
+            return True
+    return False
+
+
 def _infer_unit(question: str, fallback: str = "plain") -> str:
     clean = question.lower()
-    if "percent" in clean or "percentage" in clean or "%" in clean:
+    if _is_plain_ratio_question(question):
+        return "plain"
+    if _is_margin_question(question) or _explicit_percent_request(question):
         return "percent"
     if "usd billions" in clean or "in billions" in clean:
         return "usd_billions"
@@ -193,7 +265,16 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
     round_to_raw = plan.get("round_to")
     round_to = int(round_to_raw) if isinstance(round_to_raw, (int, float)) else _infer_round_to(question)
     round_to = max(0, min(round_to, 6))
-    unit = str(plan.get("unit") or _infer_unit(question)).strip() or "plain"
+    llm_unit = str(plan.get("unit") or "").strip().lower()
+    inferred_unit = _infer_unit(question)
+    if _explicit_percent_request(question) or _is_margin_question(question):
+        unit = "percent"
+    elif _is_plain_ratio_question(question):
+        unit = "plain"
+    elif llm_unit in {"plain", "percent", "usd_millions", "usd_billions", "usd_thousands", "other"}:
+        unit = llm_unit
+    else:
+        unit = inferred_unit
 
     parsed = ast.parse(formula, mode="eval")
     _validate_formula_ast(parsed, allowed_names=set(inputs))
