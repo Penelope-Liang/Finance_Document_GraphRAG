@@ -1652,7 +1652,12 @@ def _standardize_retrieved_contexts(
     return contexts
 
 
-def _build_run_config(args: argparse.Namespace, *, effective_style: str) -> dict[str, Any]:
+def _build_run_config(
+    args: argparse.Namespace,
+    *,
+    effective_style: str,
+    embedding_model: str,
+) -> dict[str, Any]:
     return {
         "retriever_mode": args.retriever_mode,
         "question_style": effective_style,
@@ -1663,13 +1668,13 @@ def _build_run_config(args: argparse.Namespace, *, effective_style: str) -> dict
         "metrics_table_no_doc_id": bool(args.metrics_table_no_doc_id),
         "metrics_table_no_filter": bool(args.metrics_table_no_filter),
         "use_calculation_executor": bool(args.use_calculation_executor),
-        "answer_backend": args.answer_backend,
+        "answer_backend": args.llm_backend,
         "answer_model": (
             os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
-            if args.answer_backend == "azure-openai"
-            else args.ollama_llm_model
+            if args.llm_backend == "azure-openai"
+            else args.llm_model
         ),
-        "embedding_model": args.ollama_embed_model,
+        "embedding_model": embedding_model,
         "calculation_model": args.calculation_model if args.use_calculation_executor else None,
     }
 
@@ -2769,7 +2774,11 @@ def main() -> None:
                         "gold_evidence": _extract_gold_evidence(row),
                         "retrieved_contexts": retrieved_contexts,
                         "final_context": retrieved_contexts,
-                        "run_config": _build_run_config(args, effective_style=effective_style),
+                        "run_config": _build_run_config(
+                            args,
+                            effective_style=effective_style,
+                            embedding_model=embedding_model,
+                        ),
                         "answer": answer,
                         "evidence": evidence,
                         "missing_information": missing_information,
@@ -2798,7 +2807,11 @@ def main() -> None:
                         "gold_evidence": _extract_gold_evidence(row),
                         "retrieved_contexts": [],
                         "final_context": [],
-                        "run_config": _build_run_config(args, effective_style=effective_style),
+                        "run_config": _build_run_config(
+                            args,
+                            effective_style=effective_style,
+                            embedding_model=embedding_model,
+                        ),
                         "answer": None,
                         "evidence": None,
                         "missing_information": None,
