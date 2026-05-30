@@ -6,7 +6,7 @@ The project focuses on evidence construction for financial reports. It parses PD
 
 ## Main Components
 
-- `scripts/run_financebench_qa_batch.py`: main QA runner for both RAG and GraphRAG experiments.
+- `scripts/main.py`: main QA runner for both RAG and GraphRAG experiments.
 - `scripts/evaluate_correctness.py`: answer correctness evaluator using token-level answer recall and RAGAS `answer_correctness`.
 - `scripts/financebench_pipeline/`: FinanceBench-specific routing, prompts, and calculation executor.
 - `src/neo4j_graphrag/preprocess/`: PDF element processing, section-aware chunking, and table-cell extraction.
@@ -94,7 +94,7 @@ Do not commit real credentials.
 Run the text-only RAG baseline:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/run_financebench_qa_batch.py \
+PYTHONPATH=src:scripts python -u scripts/main.py \
   --questions-path scripts/financebench_metrics_remaining_37.jsonl \
   --retriever-mode hybrid \
   --question-style llm-auto \
@@ -107,7 +107,7 @@ PYTHONPATH=src:scripts python -u scripts/run_financebench_qa_batch.py \
 Run GraphRAG with dual retrieval:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/run_financebench_qa_batch.py \
+PYTHONPATH=src:scripts python -u scripts/main.py \
   --questions-path scripts/financebench_metrics_remaining_37.jsonl \
   --retriever-mode dual \
   --question-style llm-auto \

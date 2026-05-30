@@ -49,7 +49,7 @@ for pdf in "${PDFS[@]}"; do
     --output "${tables_out}"
 done
 
-PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.write_artifact_manifest \
+PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.write_preprocessing_outputs_summary \
   --artifact 3m_chunks="${OUT_DIR}/3M_2018_10K_chunks.ndjson" \
   --artifact 3m_tables="${OUT_DIR}/3M_2018_10K_chunks_table_structured.ndjson" \
   --artifact amazon_chunks="${OUT_DIR}/AMAZON_2019_10K_chunks.ndjson" \

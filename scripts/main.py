@@ -21,17 +21,17 @@ from neo4j_graphrag.retrievers import (
 from neo4j_graphrag.retrievers.base import Retriever
 from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResultItem
 
-from neo4j_graphrag.tools.batch_ask import (
+from financebench_pipeline.cypher_prompts import (
     FINANCIAL_GRAPH_SCHEMA,
     TEXT2CYPHER_EXAMPLES,
     TEXT2CYPHER_PROMPT,
 )
 
-from financebench_pipeline.routing import (
+from financebench_pipeline.question_routing import (
     classify_question_style_auto as _classify_question_style_auto,
     classify_question_style_llm as _classify_question_style_llm,
 )
-from financebench_pipeline.prompts import build_answer_prompt as _build_answer_prompt
+from financebench_pipeline.answer_prompts import build_answer_prompt as _build_answer_prompt
 from financebench_pipeline.calculation_executor import (
     run_calculation_pipeline as _run_calculation_pipeline,
 )
@@ -499,13 +499,6 @@ def _save_results(output_path: Path, results: list[dict[str, Any]]) -> None:
 def _strip_think(text: str) -> str:
     """Remove Qwen3 <think>...</think> reasoning blocks from model output."""
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
-
-
-def _parse_answer(raw_answer: str) -> tuple[str | None, str | None]:
-    payload = _parse_answer_payload(raw_answer)
-    if isinstance(payload, dict):
-        return payload.get("answer"), payload.get("evidence")
-    return raw_answer, None
 
 
 def _parse_answer_payload(raw_answer: str) -> dict[str, Any] | None:
@@ -2305,11 +2298,11 @@ class DualRetriever(Retriever):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the 13 direct-extraction FinanceBench questions via GraphRAG.")
+    parser = argparse.ArgumentParser(description="Run FinanceBench QA with RAG or GraphRAG retrieval.")
     parser.add_argument(
         "--questions-path",
         default="dataset/financebench/financebench_direct_extract_13.jsonl",
-        help="Path to the direct-extraction question set.",
+        help="Path to the FinanceBench question set.",
     )
     parser.add_argument(
         "--max-questions",

@@ -74,7 +74,7 @@ for pdf in "${PDFS[@]}"; do
   artifact_args+=(--artifact "${stem}_tables=${tables_out}")
 done
 
-PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.write_artifact_manifest \
+PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -u -m neo4j_graphrag.preprocess.write_preprocessing_outputs_summary \
   "${artifact_args[@]}" \
   --output "${OUT_DIR}/docling_metrics_remaining_37_manifest.json"
 

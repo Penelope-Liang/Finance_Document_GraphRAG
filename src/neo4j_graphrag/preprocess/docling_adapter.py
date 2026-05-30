@@ -6,9 +6,9 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
-from neo4j_graphrag.preprocess.ingest_chunks import iter_input_files, normalize_section_display
+from neo4j_graphrag.preprocess.chunk_utils import iter_input_files, normalize_section_display
 from neo4j_graphrag.preprocess.schema.clean_document import CleanBlock, CleanDocument
 from neo4j_graphrag.preprocess.export.to_elements_ndjson import clean_document_to_element_records
 

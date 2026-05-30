@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 import re
 
-from neo4j_graphrag.preprocess.ingest_chunks import (
+from neo4j_graphrag.preprocess.chunk_utils import (
     compute_chunk_id,
     normalize_section_display,
 )
