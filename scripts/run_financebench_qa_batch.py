@@ -1597,6 +1597,90 @@ def _compact_retriever_evidence(
     return "\n\n".join(blocks)
 
 
+def _extract_gold_evidence(row: dict[str, Any]) -> Any:
+    """Preserve FinanceBench evidence annotations when present in the input row."""
+    return (
+        row.get("gold_evidence")
+        or row.get("evidence")
+        or row.get("evidences")
+        or row.get("evidence_annotations")
+    )
+
+
+def _context_score(metadata: dict[str, Any]) -> Any:
+    for key in (
+        "fused_score",
+        "score",
+        "similarity_score",
+        "normalized_score",
+        "raw_score",
+    ):
+        value = metadata.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _standardize_retrieved_contexts(
+    retriever_result_dump: dict[str, Any] | None,
+    *,
+    question_id: str,
+) -> list[dict[str, Any]]:
+    """Expose retriever_result.items in an evaluation-friendly format.
+
+    The original retriever_result is kept for debugging. This normalized list
+    adds stable rank/context_id fields needed by retrieval metrics.
+    """
+    if not retriever_result_dump:
+        return []
+    items = retriever_result_dump.get("items") or []
+    contexts: list[dict[str, Any]] = []
+    for rank, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        text = str(item.get("content") or "")
+        source = metadata.get("source")
+        contexts.append(
+            {
+                "rank": rank,
+                "context_id": f"{question_id}::ctx_{rank}",
+                "source": source,
+                "text": text,
+                "score": _context_score(metadata),
+                "doc_id": metadata.get("doc_id"),
+                "doc_name": metadata.get("doc_name") or metadata.get("doc_id"),
+                "section_name": metadata.get("section_name"),
+                "metadata": _sanitize_for_json(metadata),
+            }
+        )
+    return contexts
+
+
+def _build_run_config(args: argparse.Namespace, *, effective_style: str) -> dict[str, Any]:
+    return {
+        "retriever_mode": args.retriever_mode,
+        "question_style": effective_style,
+        "top_k": args.top_k,
+        "effective_search_ratio": args.effective_search_ratio,
+        "use_query_rewrite": bool(args.use_query_rewrite),
+        "restrict_doc_id": bool(args.restrict_doc_id),
+        "metrics_table_no_doc_id": bool(args.metrics_table_no_doc_id),
+        "metrics_table_no_filter": bool(args.metrics_table_no_filter),
+        "use_calculation_executor": bool(args.use_calculation_executor),
+        "answer_backend": args.answer_backend,
+        "answer_model": (
+            os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
+            if args.answer_backend == "azure-openai"
+            else args.ollama_llm_model
+        ),
+        "embedding_model": args.ollama_embed_model,
+        "calculation_model": args.calculation_model if args.use_calculation_executor else None,
+    }
+
+
 def _judge_prompt(query_text: str, items: list[RetrieverResultItem], max_chars: int) -> str:
     constraints = _extract_question_constraints(query_text)
     candidates_text = "\n\n".join(
@@ -2645,6 +2729,10 @@ def main() -> None:
                     if result.retriever_result is not None
                     else None
                 )
+                retrieved_contexts = _standardize_retrieved_contexts(
+                    retriever_result_dump,
+                    question_id=str(row["question_id"]),
+                )
                 llm_answer_before_calculation = None
                 calculation_executor = None
                 if (
@@ -2685,6 +2773,10 @@ def main() -> None:
                         "question": row["question"],
                         "gold_answer": row["gold_answer"],
                         "gold_justification": row.get("gold_justification"),
+                        "gold_evidence": _extract_gold_evidence(row),
+                        "retrieved_contexts": retrieved_contexts,
+                        "final_context": retrieved_contexts,
+                        "run_config": _build_run_config(args, effective_style=effective_style),
                         "answer": answer,
                         "evidence": evidence,
                         "missing_information": missing_information,
@@ -2710,6 +2802,10 @@ def main() -> None:
                         "question": row["question"],
                         "gold_answer": row["gold_answer"],
                         "gold_justification": row.get("gold_justification"),
+                        "gold_evidence": _extract_gold_evidence(row),
+                        "retrieved_contexts": [],
+                        "final_context": [],
+                        "run_config": _build_run_config(args, effective_style=effective_style),
                         "answer": None,
                         "evidence": None,
                         "missing_information": None,
