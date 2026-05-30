@@ -2224,7 +2224,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the 13 direct-extraction FinanceBench questions via GraphRAG.")
     parser.add_argument(
         "--questions-path",
-        default="scripts/financebench_direct_extract_13.jsonl",
+        default="dataset/financebench/financebench_direct_extract_13.jsonl",
         help="Path to the direct-extraction question set.",
     )
     parser.add_argument(
