@@ -7,7 +7,7 @@ The project focuses on evidence construction for financial reports. It parses PD
 ## Main Components
 
 - `scripts/run_financebench_qa_batch.py`: main QA runner for both RAG and GraphRAG experiments.
-- `scripts/judge_financebench_results.py`: LLM-as-judge evaluator for generated answers.
+- `scripts/evaluate_correctness.py`: answer correctness evaluator using token-level answer recall and RAGAS `answer_correctness`.
 - `scripts/financebench_pipeline/`: FinanceBench-specific routing, prompts, and calculation executor.
 - `src/neo4j_graphrag/preprocess/`: PDF element processing, section-aware chunking, and table-cell extraction.
 - `src/neo4j_graphrag/tools/build_graph.py`: imports chunks into the Neo4j financial document graph.
@@ -56,7 +56,13 @@ The pipeline expects:
 - Python environment with the dependencies from `pyproject.toml`.
 - Neo4j or Neo4j Aura instance containing the imported financial document graph.
 - Ollama for local answer generation and embeddings.
-- Optional Azure OpenAI credentials for LLM-as-judge evaluation.
+- Optional Azure OpenAI credentials for RAGAS answer correctness evaluation.
+
+Install the evaluation dependencies only when running the correctness evaluator:
+
+```bash
+pip install -e '.[evaluation]'
+```
 
 Common environment variables:
 
@@ -71,12 +77,14 @@ export OLLAMA_LLM_MODEL='qwen3.6:27b'
 export OLLAMA_EMBED_MODEL='bge-m3:latest'
 ```
 
-For Azure OpenAI judging:
+For Azure OpenAI correctness evaluation:
 
 ```bash
 export AZURE_OPENAI_ENDPOINT='https://...openai.azure.com/'
 export AZURE_OPENAI_API_KEY='...'
 export AZURE_OPENAI_API_VERSION='2024-12-01-preview'
+export AZURE_OPENAI_DEPLOYMENT='gpt-4.1-mini'
+export AZURE_OPENAI_EMBEDDING_DEPLOYMENT='text-embedding-3-small'
 ```
 
 Do not commit real credentials.
@@ -111,17 +119,18 @@ PYTHONPATH=src:scripts python -u scripts/run_financebench_qa_batch.py \
   --output output/graphrag_results.json
 ```
 
-Judge generated answers:
+Evaluate generated answers:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/judge_financebench_results.py \
+PYTHONPATH=src:scripts python -u scripts/evaluate_correctness.py \
   --input output/graphrag_results.json \
-  --output output/graphrag_results_judged.json \
-  --llm-as-judge azure-openai \
+  --output output/graphrag_results_correctness.json \
   --judge-model gpt-4.1-mini \
-  --no-evidence \
+  --embedding-model text-embedding-3-small \
   --overwrite
 ```
+
+This evaluator writes `correctness_evaluation` to each result row. The primary metric is `correctness_coefficient`, computed with RAGAS `answer_correctness`; `answer_recall` is reported as an auxiliary token-level lexical recall metric.
 
 ## Preprocessing and Graph Import
 
