@@ -89,7 +89,7 @@ export AZURE_OPENAI_EMBEDDING_DEPLOYMENT='text-embedding-3-small'
 
 Do not commit real credentials.
 
-## Running QA
+## Quick Start
 
 Run the text-only RAG baseline:
 
