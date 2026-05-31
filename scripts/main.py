@@ -398,6 +398,7 @@ def _build_answer_llm(
     backend: str,
     ollama_model: str,
     ollama_host: str | None,
+    ollama_num_ctx: int | None,
 ) -> Any:
     if backend == "azure-openai":
         return AzureOpenAILLM(
@@ -409,9 +410,12 @@ def _build_answer_llm(
         )
 
     ollama_kwargs = {"host": ollama_host} if ollama_host else {}
+    ollama_options: dict[str, Any] = {"temperature": 0}
+    if ollama_num_ctx is not None:
+        ollama_options["num_ctx"] = ollama_num_ctx
     return OllamaLLM(
         model_name=ollama_model,
-        model_params={"options": {"temperature": 0}},
+        model_params={"options": ollama_options},
         **ollama_kwargs,
     )
 
@@ -1682,6 +1686,7 @@ def _build_run_config(
             else args.llm_model
         ),
         "embedding_model": embedding_model,
+        "ollama_num_ctx": args.ollama_num_ctx if args.llm_backend == "ollama" else None,
         "calculation_model": args.calculation_model if args.use_calculation_executor else None,
     }
 
@@ -2445,6 +2450,12 @@ def main() -> None:
         help="Ollama answer model when --llm-backend=ollama.",
     )
     parser.add_argument(
+        "--ollama-num-ctx",
+        type=int,
+        default=None,
+        help="Set Ollama options.num_ctx for local LLM calls.",
+    )
+    parser.add_argument(
         "--use-calculation-executor",
         action="store_true",
         help=(
@@ -2479,11 +2490,15 @@ def main() -> None:
         backend=args.llm_backend,
         ollama_model=args.llm_model,
         ollama_host=ollama_host,
+        ollama_num_ctx=args.ollama_num_ctx,
     )
+    ollama_options: dict[str, Any] = {"temperature": 0}
+    if args.ollama_num_ctx is not None:
+        ollama_options["num_ctx"] = args.ollama_num_ctx
     calc_llm = (
         OllamaLLM(
             model_name=args.calculation_model,
-            model_params={"options": {"temperature": 0}},
+            model_params={"options": ollama_options},
             **ollama_kwargs,
         )
         if args.use_calculation_executor
@@ -2491,7 +2506,7 @@ def main() -> None:
     )
     judge_llm = OllamaLLM(
         model_name=args.llm_judge_model,
-        model_params={"options": {"temperature": 0}},
+        model_params={"options": ollama_options},
         **ollama_kwargs,
     )
     embedder = OllamaEmbeddings(model=embedding_model, **ollama_kwargs)
