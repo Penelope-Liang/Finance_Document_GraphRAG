@@ -16,13 +16,24 @@ answer requested by the question.
 Rules:
 1. Output valid JSON only. No markdown.
 2. Put all numeric inputs in "inputs" as numbers, not strings.
-3. Put the arithmetic expression in "formula". It may only reference variables
+3. List every required input in "required_inputs", including inputs that are
+   missing. Each required input must include name, variable, value, unit, period,
+   and source_text. Use value=null when the input is missing.
+4. Put missing or ambiguous required inputs in "missing_inputs". If any required
+   input is missing or ambiguous, set success=false, formula=null, and do not
+   invent substitute values.
+5. Put the arithmetic expression in "formula". It may only reference variables
    defined in "inputs" and use +, -, *, /, **, parentheses, and round/abs/min/max.
-4. The formula must compute the final answer requested by the question, not just
+6. The formula must compute the final answer requested by the question, not just
    restate one input value.
-5. Use the rounding requested by the question. If not stated, use 2 decimals.
-6. If required values are missing or ambiguous, return success=false with a
+7. Use the rounding requested by the question. If not stated, use 2 decimals.
+8. If required values are missing or ambiguous, return success=false with a
    short error and do not invent values.
+9. Do not use unrelated values even if they are numerically available in the
+   evidence. The input name, period, statement context, and unit must match the
+   question.
+10. Do not return a list of source values as the final answer. Return only the
+   computed final metric requested by the question.
 
 CRITICAL unit rules:
 - unit="percent" ONLY when the question explicitly asks for "percent", "percentage",
@@ -39,10 +50,22 @@ CRITICAL unit rules:
 Return this schema:
 {{
   "success": boolean,
+  "required_inputs": [
+    {{
+      "name": "human-readable input name",
+      "variable": "variable_name_or_null",
+      "value": number or null,
+      "unit": "million|billion|thousand|percent|plain|other|null",
+      "period": "fiscal year or period label or null",
+      "source_text": "short evidence quote or null"
+    }}
+  ],
+  "missing_inputs": ["missing input description"],
   "inputs": {{"variable_name": number}},
   "formula": "arithmetic expression or null",
   "round_to": integer,
   "unit": "plain|percent|usd_millions|usd_billions|usd_thousands|other",
+  "reason": "brief explanation of formula, unit normalization, and rounding",
   "error": "string or null"
 }}
 
@@ -90,6 +113,9 @@ class FormulaResult:
     inputs: dict[str, float]
     round_to: int
     unit: str
+    required_inputs: list[dict[str, Any]]
+    missing_inputs: list[str]
+    reason: str | None = None
     error: str | None = None
 
 
@@ -260,6 +286,36 @@ def _normalize_inputs(raw_inputs: Any) -> dict[str, float]:
     return inputs
 
 
+def _normalize_required_inputs(raw_required_inputs: Any) -> list[dict[str, Any]]:
+    if raw_required_inputs is None:
+        return []
+    if not isinstance(raw_required_inputs, list):
+        raise ValueError("required_inputs must be a list")
+    normalized: list[dict[str, Any]] = []
+    for item in raw_required_inputs:
+        if not isinstance(item, dict):
+            raise ValueError("each required input must be an object")
+        normalized.append(
+            {
+                "name": item.get("name"),
+                "variable": item.get("variable"),
+                "value": item.get("value"),
+                "unit": item.get("unit"),
+                "period": item.get("period"),
+                "source_text": item.get("source_text"),
+            }
+        )
+    return normalized
+
+
+def _normalize_missing_inputs(raw_missing_inputs: Any) -> list[str]:
+    if raw_missing_inputs is None:
+        return []
+    if not isinstance(raw_missing_inputs, list):
+        raise ValueError("missing_inputs must be a list")
+    return [str(item) for item in raw_missing_inputs if str(item).strip()]
+
+
 def _validate_formula_ast(node: ast.AST, *, allowed_names: set[str]) -> None:
     for child in ast.walk(node):
         if not isinstance(child, _ALLOWED_NODE_TYPES):
@@ -278,6 +334,9 @@ def _validate_formula_ast(node: ast.AST, *, allowed_names: set[str]) -> None:
 
 
 def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResult:
+    required_inputs = _normalize_required_inputs(plan.get("required_inputs"))
+    missing_inputs = _normalize_missing_inputs(plan.get("missing_inputs"))
+    reason = str(plan.get("reason") or "").strip() or None
     if not bool(plan.get("success")):
         return FormulaResult(
             success=False,
@@ -286,7 +345,23 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
             inputs={},
             round_to=_infer_round_to(question),
             unit=_infer_unit(question),
+            required_inputs=required_inputs,
+            missing_inputs=missing_inputs,
+            reason=reason,
             error=str(plan.get("error") or "calculation plan marked unsuccessful"),
+        )
+    if missing_inputs:
+        return FormulaResult(
+            success=False,
+            answer=None,
+            formula=None,
+            inputs={},
+            round_to=_infer_round_to(question),
+            unit=_infer_unit(question),
+            required_inputs=required_inputs,
+            missing_inputs=missing_inputs,
+            reason=reason,
+            error="calculation plan marked successful despite missing inputs",
         )
 
     inputs = _normalize_inputs(plan.get("inputs"))
@@ -324,6 +399,9 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
         inputs=inputs,
         round_to=round_to,
         unit=unit,
+        required_inputs=required_inputs,
+        missing_inputs=missing_inputs,
+        reason=reason,
         error=None,
     )
 
@@ -388,10 +466,13 @@ def run_calculation_pipeline(
         "calculation_answer": answer,
         "calculation_result": result.answer,
         "calculation_plan": {
+            "required_inputs": result.required_inputs,
+            "missing_inputs": result.missing_inputs,
             "inputs": result.inputs,
             "formula": result.formula,
             "round_to": result.round_to,
             "unit": result.unit,
+            "reason": result.reason,
         },
         "calculation_error": result.error,
         "calculation_raw_response": raw_response,
