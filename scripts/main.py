@@ -497,8 +497,15 @@ def _save_results(output_path: Path, results: list[dict[str, Any]]) -> None:
 
 
 def _strip_think(text: str) -> str:
-    """Remove Qwen3 <think>...</think> reasoning blocks from model output."""
-    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+    """Remove reasoning traces emitted by local reasoning models."""
+    cleaned = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(
+        r"^\s*Thinking\.\.\..*?\.\.\.done thinking\.\s*",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return cleaned.strip()
 
 
 def _parse_answer_payload(raw_answer: str) -> dict[str, Any] | None:
