@@ -107,10 +107,10 @@ class ChunkBuffer:
             "is_front_matter": is_front_matter,
             "is_appendix_like": is_appendix_like,
             "should_index": not (is_toc_like or is_front_matter or is_appendix_like),
-            "parser_engine": _choose_label(self.parser_engines, default="unstructured"),
+            "parser_engine": _choose_label(self.parser_engines, default="docling"),
             "intermediate_schema": _choose_label(
                 self.intermediate_schemas,
-                default="unstructured_compatible",
+                default="docling_elements",
             ),
             "chunker": "legacy_chunk_from_elements",
         }
@@ -362,7 +362,7 @@ def _make_record(
         "section_name": section_name,
         "page": min(buffer.pages) if buffer.pages else None,
         "source_type": source_type,
-        "parser_engine": metadata.get("parser_engine", "unstructured"),
+        "parser_engine": metadata.get("parser_engine", "docling"),
         "chunk_engine": chunk_engine,
         "metadata": metadata,
     }
