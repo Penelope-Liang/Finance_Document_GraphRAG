@@ -1676,10 +1676,9 @@ def _build_run_config(
         "effective_search_ratio": args.effective_search_ratio,
         "use_query_rewrite": bool(args.use_query_rewrite),
         "restrict_doc_id": bool(args.restrict_doc_id),
-        "metrics_table_no_filter": bool(args.metrics_table_no_filter),
         "use_calculation_executor": bool(args.use_calculation_executor),
-        "answer_backend": args.llm_backend,
-        "answer_model": (
+        "llm_backend": args.llm_backend,
+        "llm_model": (
             os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
             if args.llm_backend == "azure-openai"
             else args.llm_model
@@ -1905,8 +1904,6 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
     )
 
 
-_DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
-
 # Statement-type detection: hint terms in the question → section_name patterns
 # in Neo4j.  Each entry has:
 #   - hints: substrings to look for in the question
@@ -2025,11 +2022,6 @@ def _detect_statement_type(query_text: str) -> dict[str, Any] | None:
     return None
 
 
-def _extract_doc_id(query_text: str) -> str | None:
-    match = _DOC_ID_RE.search(query_text or "")
-    return match.group(1).strip() if match else None
-
-
 def _build_retrieval_filter(
     *,
     row: dict[str, Any],
@@ -2121,8 +2113,6 @@ class PrimaryStatementRetriever(Retriever):
         spec = _detect_statement_type(query_text)
         doc_id = (query_params or {}).get("doc_id") if query_params else None
         company_doc_key = (query_params or {}).get("company_doc_key") if query_params else None
-        if doc_id is None:
-            doc_id = _extract_doc_id(query_text)
 
         if spec is None:
             return RetrieverResult(
@@ -2366,14 +2356,6 @@ def main() -> None:
         help=(
             "FinanceBench_RAG-style retrieval rewrite: keep the original question for answering, "
             "but use a retrieval-friendly query with reported components in dual mode."
-        ),
-    )
-    parser.add_argument(
-        "--metrics-table-no-filter",
-        action="store_true",
-        help=(
-            "Experiment only: do not apply either doc_id or company filtering in the "
-            "deterministic metrics TableCell retriever."
         ),
     )
     parser.add_argument(
@@ -2702,14 +2684,10 @@ def main() -> None:
                     if args.use_query_rewrite:
                         retriever_config["retrieval_query_text"] = retrieval_query_text
                         if effective_style in {"calculation", "domain"}:
-                            if args.metrics_table_no_filter:
-                                retriever_config["metrics_doc_id"] = None
-                                retriever_config["metrics_company_doc_key"] = None
-                            else:
-                                retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
-                                retriever_config["metrics_company_doc_key"] = retrieval_filter[
-                                    "company_doc_key"
-                                ]
+                            retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
+                            retriever_config["metrics_company_doc_key"] = retrieval_filter[
+                                "company_doc_key"
+                            ]
                             retriever_config["metrics_plan"] = query_rewrite_plan
                 elif args.retriever_mode == "text2cypher":
                     retriever_config["t2c_style"] = effective_style
