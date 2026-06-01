@@ -132,15 +132,15 @@ PYTHONPATH=src:scripts python -u scripts/evaluate_correctness.py \
 
 This evaluator writes `correctness_evaluation` to each result row. The primary metric is `correctness_coefficient`, computed with RAGAS `answer_correctness`; `answer_recall` is reported as an auxiliary token-level lexical recall metric.
 
-## Preprocessing and Graph Import
+## Archived Preprocessing and Graph Import
 
-The current repository keeps the batch scripts used during the thesis experiments:
+Historical batch scripts used during thesis experiments are archived under `_archive/scripts/`:
 
-- `scripts/run_docling_direct_extract_13.sh`
-- `scripts/run_docling_metrics_remaining_37.sh`
-- `scripts/import_direct_extract_13_to_neo4j.sh`
+- `_archive/scripts/run_docling_direct_extract_13.sh`
+- `_archive/scripts/run_docling_metrics_remaining_37.sh`
+- `_archive/scripts/import_direct_extract_13_to_neo4j.sh`
 
-These scripts parse selected FinanceBench PDFs with Docling, construct section-aware chunks, extract structured table cells, and import the result into Neo4j. They are retained for reproducibility of the experiment batches, while the main QA experiments assume the graph has already been imported.
+These scripts parse selected FinanceBench PDFs with Docling, construct section-aware chunks, extract structured table cells, and import the result into Neo4j. They are retained only for reproducibility of old experiment batches; the active QA workflow assumes the graph has already been imported.
 
 ## Notes
 
