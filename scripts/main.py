@@ -1676,7 +1676,6 @@ def _build_run_config(
         "effective_search_ratio": args.effective_search_ratio,
         "use_query_rewrite": bool(args.use_query_rewrite),
         "restrict_doc_id": bool(args.restrict_doc_id),
-        "metrics_table_no_doc_id": bool(args.metrics_table_no_doc_id),
         "metrics_table_no_filter": bool(args.metrics_table_no_filter),
         "use_calculation_executor": bool(args.use_calculation_executor),
         "answer_backend": args.llm_backend,
@@ -2370,15 +2369,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--metrics-table-no-doc-id",
-        action="store_true",
-        help=(
-            "Experiment only: do not restrict the deterministic metrics TableCell retriever "
-            "to the exact question doc_id; use a company-level doc_id prefix filter instead. "
-            "Hybrid retrieval is unaffected."
-        ),
-    )
-    parser.add_argument(
         "--metrics-table-no-filter",
         action="store_true",
         help=(
@@ -2715,14 +2705,11 @@ def main() -> None:
                             if args.metrics_table_no_filter:
                                 retriever_config["metrics_doc_id"] = None
                                 retriever_config["metrics_company_doc_key"] = None
-                            elif args.metrics_table_no_doc_id:
-                                retriever_config["metrics_doc_id"] = None
+                            else:
+                                retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
                                 retriever_config["metrics_company_doc_key"] = retrieval_filter[
                                     "company_doc_key"
                                 ]
-                            else:
-                                retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
-                                retriever_config["metrics_company_doc_key"] = None
                             retriever_config["metrics_plan"] = query_rewrite_plan
                 elif args.retriever_mode == "text2cypher":
                     retriever_config["t2c_style"] = effective_style
