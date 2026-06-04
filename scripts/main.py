@@ -2047,11 +2047,24 @@ def _build_retrieval_filter(
     }
 
 
+_PRIMARY_STATEMENT_SECTION_BLACKLIST = (
+    "selected financial data",
+    "table of contents",
+    "quarterly financial",
+    "off-balance sheet arrangements",
+    "opinion on the financial statements",
+)
+
+
 _PRIMARY_STATEMENT_QUERY = """
 MATCH (chunk:Chunk)
 WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
   AND ($company_doc_key IS NULL OR toLower(chunk.doc_id) STARTS WITH $company_doc_key)
   AND chunk.should_index = true
+  AND (
+    chunk.section_name IS NULL
+    OR NONE(pat IN $section_blacklist WHERE toLower(chunk.section_name) CONTAINS pat)
+  )
   AND (
     chunk.statement_type = $statement_type
     OR (
@@ -2134,6 +2147,7 @@ class PrimaryStatementRetriever(Retriever):
             "statement_type": spec["name"],
             "includes": list(spec["includes"]),
             "excludes": list(spec["excludes"]),
+            "section_blacklist": list(_PRIMARY_STATEMENT_SECTION_BLACKLIST),
             "limit": self.limit,
         }
         with self.driver.session(database=self.neo4j_database) as session:
