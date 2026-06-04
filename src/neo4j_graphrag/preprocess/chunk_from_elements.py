@@ -77,7 +77,7 @@ class ChunkBuffer:
     def build_text(self) -> str:
         return "\n\n".join(x for x in self.texts if x.strip()).strip()
 
-    def build_metadata(self) -> dict[str, Any]:
+    def build_metadata(self, *, last_chunk_is_front_matter: bool = False) -> dict[str, Any]:
         page_start = min(self.pages) if self.pages else None
         page_end = max(self.pages) if self.pages else None
         bbox_union = _merge_bboxes(self.bboxes)
@@ -88,6 +88,7 @@ class ChunkBuffer:
             text=preview_text,
             page_start=page_start,
             is_toc_like=is_toc_like,
+            last_chunk_is_front_matter=last_chunk_is_front_matter,
         )
         is_appendix_like = _is_appendix_like_chunk(
             section_name=self.section_name,
@@ -260,12 +261,14 @@ def _is_front_matter_chunk(
     section_name: str,
     text: str,
     page_start: Optional[int],
-    is_toc_like: bool,
+    is_toc_like: bool = False,
+    last_chunk_is_front_matter: bool = False,
 ) -> bool:
     clean = " ".join((text or "").split()).lower()
     section = (section_name or "").strip().lower()
-    if is_toc_like:
-        return True
+    # Previous behavior, kept for rollback reference:
+    # if is_toc_like:
+    #     return True
     front_matter_signals = (
         "united states securities and exchange commission",
         "form 10-k",
@@ -283,11 +286,14 @@ def _is_front_matter_chunk(
         if "securities registered pursuant" in clean:
             return True
     if page_start is not None and page_start <= 5:
-        if "continued" in clean and (
-            "financial statements and supplementary data" in clean
-            or "form 10-k summary" in clean
-            or "index to financial statements" in clean
-        ):
+        # Previous behavior, kept for rollback reference:
+        # if "continued" in clean and (
+        #     "financial statements and supplementary data" in clean
+        #     or "form 10-k summary" in clean
+        #     or "index to financial statements" in clean
+        # ):
+        #     return True
+        if "continued" in clean and last_chunk_is_front_matter:
             return True
     return False
 
@@ -340,6 +346,7 @@ def _make_record(
     chunk_id_version: str,
     source_type: str,
     chunk_engine: str,
+    last_chunk_is_front_matter: bool = False,
 ) -> Optional[dict[str, Any]]:
     text = buffer.build_text()
     if not text:
@@ -352,7 +359,7 @@ def _make_record(
         chunk_index=chunk_index,
         text=text,
     )
-    metadata = buffer.build_metadata()
+    metadata = buffer.build_metadata(last_chunk_is_front_matter=last_chunk_is_front_matter)
     return {
         "chunk_id": chunk_id,
         "chunk_id_version": chunk_id_version,
@@ -426,9 +433,10 @@ def main() -> None:
     chunk_index = 0
     pending_table_record: Optional[dict[str, Any]] = None
     pending_title: Optional[ElementRow] = None
+    last_chunk_is_front_matter = False
 
     def flush_buffer() -> None:
-        nonlocal buffer, chunk_index
+        nonlocal buffer, chunk_index, last_chunk_is_front_matter
         if buffer is None or buffer.is_empty:
             buffer = None
             return
@@ -438,9 +446,13 @@ def main() -> None:
             chunk_id_version=args.chunk_id_version,
             source_type="pdf",
             chunk_engine="elements_structured",
+            last_chunk_is_front_matter=last_chunk_is_front_matter,
         )
         if record is not None:
             out_records.append(record)
+            last_chunk_is_front_matter = bool(
+                (record.get("metadata") or {}).get("is_front_matter")
+            )
             chunk_index += 1
         buffer = None
 
@@ -460,6 +472,7 @@ def main() -> None:
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
             pending_table_record = None
             pending_title = None
+            last_chunk_is_front_matter = False
 
         if row.category == "Title":
             flush_buffer()
@@ -483,9 +496,13 @@ def main() -> None:
                 chunk_id_version=args.chunk_id_version,
                 source_type="pdf",
                 chunk_engine="elements_table",
+                last_chunk_is_front_matter=last_chunk_is_front_matter,
             )
             if record is not None:
                 out_records.append(record)
+                last_chunk_is_front_matter = bool(
+                    (record.get("metadata") or {}).get("is_front_matter")
+                )
                 pending_table_record = record
                 chunk_index += 1
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
