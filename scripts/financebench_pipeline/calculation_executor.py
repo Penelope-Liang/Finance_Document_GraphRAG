@@ -22,17 +22,30 @@ Rules:
 4. Put missing or ambiguous required inputs in "missing_inputs". If any required
    input is missing or ambiguous, set success=false, formula=null, and do not
    invent substitute values.
-5. Put the arithmetic expression in "formula". It may only reference variables
+5. If source_text contains a clear numeric value for an input, put that number
+   in value and in inputs. Do not set value=null for an input whose numeric value
+   is plainly present in source_text.
+6. Do not use derived values such as average inventory, average accounts payable,
+   change in inventory, or change in receivables as required_inputs unless that
+   derived value is explicitly reported in the evidence. Instead, extract the
+   underlying period values separately and compute the average or change inside
+   the formula.
+7. For example, if a calculation needs average working capital, do not create one
+   required input named average_working_capital unless that exact value is
+   reported. Instead, create current_assets_2022, current_liabilities_2022,
+   current_assets_2021, and current_liabilities_2021, then compute the average
+   in the formula from those period-specific values.
+8. Put the arithmetic expression in "formula". It may only reference variables
    defined in "inputs" and use +, -, *, /, **, parentheses, and round/abs/min/max.
-6. The formula must compute the final answer requested by the question, not just
+9. The formula must compute the final answer requested by the question, not just
    restate one input value.
-7. Use the rounding requested by the question. If not stated, use 2 decimals.
-8. If required values are missing or ambiguous, return success=false with a
+10. Use the rounding requested by the question. If not stated, use 2 decimals.
+11. If required values are missing or ambiguous, return success=false with a
    short error and do not invent values.
-9. Do not use unrelated values even if they are numerically available in the
+12. Do not use unrelated values even if they are numerically available in the
    evidence. The input name, period, statement context, and unit must match the
    question.
-10. Do not return a list of source values as the final answer. Return only the
+13. Do not return a list of source values as the final answer. Return only the
    computed final metric requested by the question.
 
 CRITICAL unit rules:
