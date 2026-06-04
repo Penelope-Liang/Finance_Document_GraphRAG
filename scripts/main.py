@@ -204,6 +204,8 @@ Examples:
 
 Rules:
 - Return only Cypher. No prose.
+- Only generate read-only Cypher. Do not use CREATE, MERGE, SET, DELETE, DETACH, REMOVE, DROP, LOAD CSV, CALL apoc.*, or database-management procedures.
+- Allowed procedure calls are limited to read-only index/search procedures such as db.index.vector.queryNodes and db.index.fulltext.queryNodes.
 - This is a calculation question, so retrieve every input needed for the formula instead of a single final value.
 - Prefer TableCell evidence over Chunk text for calculation inputs whenever possible.
 - For ratios, margins, averages, YoY changes, turnover, DPO, CCC, or CAGR, fetch all required numerator/denominator rows and all required years/periods.
@@ -362,6 +364,8 @@ Examples:
 
 Rules:
 - Return only Cypher. No prose.
+- Only generate read-only Cypher. Do not use CREATE, MERGE, SET, DELETE, DETACH, REMOVE, DROP, LOAD CSV, CALL apoc.*, or database-management procedures.
+- Allowed procedure calls are limited to read-only index/search procedures such as db.index.vector.queryNodes and db.index.fulltext.queryNodes.
 - This is an open-ended financial question: retrieve evidence, not just a final answer.
 - Use constraints from the question only when present. If the question has a company, year, quarter, filing type, date, section, or topic, include those constraints. Do not invent missing constraints.
 - Prefer same-company evidence using doc_id prefixes when a company is identifiable.

@@ -44,6 +44,40 @@ from neo4j_graphrag.types import (
 
 logger = logging.getLogger(__name__)
 
+WRITE_CYPHER_KEYWORDS = re.compile(
+    r"\b(CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|LOAD\s+CSV)\b",
+    re.IGNORECASE,
+)
+DISALLOWED_CYPHER_CALLS = re.compile(
+    r"\bCALL\s+(apoc\.|dbms\.|db\.create|db\.index\.fulltext\.create)",
+    re.IGNORECASE,
+)
+STRING_LITERALS = re.compile(
+    r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"",
+    re.DOTALL,
+)
+BACKTICK_IDENTIFIERS = re.compile(r"`(?:[^`]|``)*`")
+
+
+def _strip_string_literals(cypher: str) -> str:
+    without_strings = STRING_LITERALS.sub("", cypher)
+    return BACKTICK_IDENTIFIERS.sub("", without_strings)
+
+
+def _validate_readonly_cypher(cypher: str) -> None:
+    if not cypher or not cypher.strip():
+        raise Text2CypherRetrievalError("Generated Cypher is empty.")
+
+    structural_cypher = _strip_string_literals(cypher)
+    if WRITE_CYPHER_KEYWORDS.search(structural_cypher):
+        raise Text2CypherRetrievalError(
+            f"Generated Cypher contains a write operation: {cypher}"
+        )
+    if DISALLOWED_CYPHER_CALLS.search(structural_cypher):
+        raise Text2CypherRetrievalError(
+            f"Generated Cypher contains a disallowed procedure call: {cypher}"
+        )
+
 
 def extract_cypher(text: str) -> str:
     """Extract and format Cypher query from text, handling code blocks and special characters.
@@ -212,6 +246,7 @@ class Text2CypherRetriever(Retriever):
         try:
             llm_result = self.llm.invoke(prompt)
             t2c_query = extract_cypher(llm_result.content)
+            _validate_readonly_cypher(t2c_query)
             logger.debug("Text2CypherRetriever Cypher query: %s", t2c_query)
             records, _, _ = self.driver.execute_query(
                 query_=t2c_query,

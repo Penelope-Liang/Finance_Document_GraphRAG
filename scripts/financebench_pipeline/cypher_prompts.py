@@ -38,6 +38,8 @@ Examples:
 
 Rules:
 - Return only Cypher. No prose.
+- Only generate read-only Cypher. Do not use CREATE, MERGE, SET, DELETE, DETACH, REMOVE, DROP, LOAD CSV, CALL apoc.*, or database-management procedures.
+- Allowed procedure calls are limited to read-only index/search procedures such as db.index.vector.queryNodes and db.index.fulltext.queryNodes.
 - Prefer TableCell evidence over Chunk text for metrics questions.
 - Always filter to the target filing using doc_id when the filing can be inferred from the question.
 - For financial statements, prefer primary statement sections over note sections when possible.
