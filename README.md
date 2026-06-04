@@ -12,6 +12,8 @@ The project focuses on evidence construction for financial reports. It parses PD
 - `src/neo4j_graphrag/preprocess/`: PDF element processing, section-aware chunking, and table-cell extraction.
 - `src/neo4j_graphrag/tools/build_graph.py`: imports chunks into the Neo4j financial document graph.
 - `src/neo4j_graphrag/tools/import_tables.py`: imports structured table and table-cell nodes into Neo4j.
+- `src/neo4j_graphrag/tools/build_chunk_embeddings.py`: builds chunk embedding JSONL files for vector indexing.
+- `src/neo4j_graphrag/tools/import_chunk_vectors.py`: imports chunk embeddings into Neo4j and creates the vector index.
 - `src/neo4j_graphrag/retrievers/`: hybrid, vector, Text2Cypher, and reranking retriever implementations.
 
 ## Graph Representation
