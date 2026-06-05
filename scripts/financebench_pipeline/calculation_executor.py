@@ -15,16 +15,19 @@ answer requested by the question.
 
 Rules:
 1. Output valid JSON only. No markdown.
-2. Put all numeric inputs in "inputs" as numbers, not strings.
+2. "required_inputs" is the single source of truth for the calculation. Every
+   numeric value used by the formula must appear there as a number (not a string).
+   Give each required input a unique "variable": a short identifier made of
+   letters, digits, and underscores (e.g. revenue_2022) that the formula will
+   reference.
 3. List every required input in "required_inputs", including inputs that are
    missing. Each required input must include name, variable, value, unit, period,
    and source_text. Use value=null when the input is missing.
-4. Put missing or ambiguous required inputs in "missing_inputs". If any required
-   input is missing or ambiguous, set success=false, formula=null, and do not
-   invent substitute values.
+4. For any input that is missing or ambiguous, set its value=null and set
+   formula=null, and do not invent substitute values.
 5. If source_text contains a clear numeric value for an input, put that number
-   in value and in inputs. Do not set value=null for an input whose numeric value
-   is plainly present in source_text.
+   in value. Do not set value=null for an input whose numeric value is plainly
+   present in source_text.
 6. Do not use derived values such as average inventory, average accounts payable,
    change in inventory, or change in receivables as required_inputs unless that
    derived value is explicitly reported in the evidence. Instead, extract the
@@ -35,18 +38,21 @@ Rules:
    reported. Instead, create current_assets_2022, current_liabilities_2022,
    current_assets_2021, and current_liabilities_2021, then compute the average
    in the formula from those period-specific values.
-8. Put the arithmetic expression in "formula". It may only reference variables
-   defined in "inputs" and use +, -, *, /, **, parentheses, and round/abs/min/max.
+8. Put the arithmetic expression in "formula". It may only reference the
+   "variable" names you defined in "required_inputs" and use +, -, *, /, **,
+   parentheses, and round/abs/min/max.
 9. The formula must compute the final answer requested by the question, not just
    restate one input value.
 10. Use the rounding requested by the question. If not stated, use 2 decimals.
-11. If required values are missing or ambiguous, return success=false with a
-   short error and do not invent values.
+11. If required values are missing or ambiguous, leave formula=null and do not
+   invent values.
 12. Do not use unrelated values even if they are numerically available in the
    evidence. The input name, period, statement context, and unit must match the
    question.
 13. Do not return a list of source values as the final answer. Return only the
    computed final metric requested by the question.
+14. If all required input values are present (no value is null), formula must be
+   non-null: write the arithmetic expression that computes the answer.
 
 CRITICAL unit rules:
 - unit="percent" ONLY when the question explicitly asks for "percent", "percentage",
@@ -62,7 +68,6 @@ CRITICAL unit rules:
 
 Return this schema:
 {{
-  "success": boolean,
   "required_inputs": [
     {{
       "name": "human-readable input name",
@@ -73,13 +78,10 @@ Return this schema:
       "source_text": "short evidence quote or null"
     }}
   ],
-  "missing_inputs": ["missing input description"],
-  "inputs": {{"variable_name": number}},
   "formula": "arithmetic expression or null",
   "round_to": integer,
   "unit": "plain|percent|usd_millions|usd_billions|usd_thousands|other",
-  "reason": "brief explanation of formula, unit normalization, and rounding",
-  "error": "string or null"
+  "reason": "brief explanation of formula, unit normalization, and rounding"
 }}
 
 Question:
@@ -286,19 +288,6 @@ def _infer_unit(question: str, fallback: str = "plain") -> str:
     return fallback
 
 
-def _normalize_inputs(raw_inputs: Any) -> dict[str, float]:
-    if not isinstance(raw_inputs, dict):
-        raise ValueError("inputs must be an object")
-    inputs: dict[str, float] = {}
-    for key, value in raw_inputs.items():
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", str(key)):
-            raise ValueError(f"invalid input variable name: {key}")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"input {key} must be numeric")
-        inputs[str(key)] = float(value)
-    return inputs
-
-
 def _normalize_required_inputs(raw_required_inputs: Any) -> list[dict[str, Any]]:
     if raw_required_inputs is None:
         return []
@@ -321,14 +310,6 @@ def _normalize_required_inputs(raw_required_inputs: Any) -> list[dict[str, Any]]
     return normalized
 
 
-def _normalize_missing_inputs(raw_missing_inputs: Any) -> list[str]:
-    if raw_missing_inputs is None:
-        return []
-    if not isinstance(raw_missing_inputs, list):
-        raise ValueError("missing_inputs must be a list")
-    return [str(item) for item in raw_missing_inputs if str(item).strip()]
-
-
 def _validate_formula_ast(node: ast.AST, *, allowed_names: set[str]) -> None:
     for child in ast.walk(node):
         if not isinstance(child, _ALLOWED_NODE_TYPES):
@@ -346,48 +327,160 @@ def _validate_formula_ast(node: ast.AST, *, allowed_names: set[str]) -> None:
                 raise ValueError("only numeric constants are allowed")
 
 
+def _derive_inputs_from_required(required_inputs: list[dict[str, Any]]) -> dict[str, float]:
+    """Rebuild the executable variable map from per-input values the model already
+    extracted, for when it forgot to fill the separate ``inputs`` object."""
+    derived: dict[str, float] = {}
+    for item in required_inputs:
+        variable = item.get("variable")
+        value = item.get("value")
+        if not isinstance(variable, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", variable):
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        derived[variable] = float(value)
+    return derived
+
+
+def _missing_required_input_names(required_inputs: list[dict[str, Any]]) -> list[str]:
+    """Genuinely-missing inputs are those whose value is null/non-numeric."""
+    names: list[str] = []
+    for item in required_inputs:
+        value = item.get("value")
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            names.append(str(item.get("name") or item.get("variable") or "unnamed input"))
+    return names
+
+
+_NUMERIC_TOKEN = re.compile(r"\(?\$?\s*\d[\d,]*(?:\.\d+)?\s*\)?")
+
+
+def _significant_digits(text: str) -> str:
+    """Reduce a numeric string to its significant digits: drop everything that is
+    not a digit (``$``, commas, decimal point, sign, parentheses) then strip
+    leading and trailing zeros so scale differences (e.g. millions vs billions)
+    do not cause a mismatch."""
+    return re.sub(r"\D", "", text).lstrip("0").rstrip("0")
+
+
+def _value_significant_digits(value: float) -> str:
+    return _significant_digits(f"{abs(float(value)):.6f}")
+
+
+def _value_supported_by_source(value: float, source_text: Any) -> bool:
+    """Conservative anti-hallucination check: a value is supported when its
+    significant digits appear in (or are a rounding-prefix of) some number quoted
+    in source_text. When source_text has no number to compare against, we cannot
+    prove fabrication and do not penalize the value."""
+    if not isinstance(source_text, str) or not source_text.strip():
+        return True
+    tokens = _NUMERIC_TOKEN.findall(source_text)
+    if not tokens:
+        return True
+    target = _value_significant_digits(value)
+    if not target:  # value is zero; nothing meaningful to verify
+        return True
+    for token in tokens:
+        candidate = _significant_digits(token)
+        if not candidate:
+            continue
+        if target == candidate:
+            return True
+        shorter, longer = (target, candidate) if len(target) <= len(candidate) else (candidate, target)
+        if len(shorter) >= 2 and longer.startswith(shorter):
+            return True
+    return False
+
+
+def _unsupported_required_input_names(required_inputs: list[dict[str, Any]]) -> list[str]:
+    """Inputs that carry a numeric value which does not appear in their own
+    source_text quote (likely hallucinated)."""
+    names: list[str] = []
+    for item in required_inputs:
+        value = item.get("value")
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if not _value_supported_by_source(value, item.get("source_text")):
+            names.append(str(item.get("name") or item.get("variable") or "unnamed input"))
+    return names
+
+
 def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResult:
     required_inputs = _normalize_required_inputs(plan.get("required_inputs"))
-    missing_inputs = _normalize_missing_inputs(plan.get("missing_inputs"))
     reason = str(plan.get("reason") or "").strip() or None
-    if not bool(plan.get("success")):
+    round_to_default = _infer_round_to(question)
+    unit_default = _infer_unit(question)
+
+    # required_inputs is the single source of truth. We never trust the model's
+    # self-reported "success", "missing_inputs", or "inputs" map; everything below
+    # is derived from required_inputs. Missing data = required inputs with a
+    # null/non-numeric value.
+    missing_inputs = sorted(_missing_required_input_names(required_inputs))
+    # Anti-hallucination: a value must actually appear in its own source_text quote.
+    unsupported_inputs = sorted(_unsupported_required_input_names(required_inputs))
+    if missing_inputs or unsupported_inputs:
+        error_parts = []
+        if missing_inputs:
+            error_parts.append("missing required inputs: " + ", ".join(missing_inputs))
+        if unsupported_inputs:
+            error_parts.append("inputs not found in source_text: " + ", ".join(unsupported_inputs))
         return FormulaResult(
             success=False,
             answer=None,
             formula=None,
             inputs={},
-            round_to=_infer_round_to(question),
-            unit=_infer_unit(question),
+            round_to=round_to_default,
+            unit=unit_default,
             required_inputs=required_inputs,
             missing_inputs=missing_inputs,
             reason=reason,
-            error=str(plan.get("error") or "calculation plan marked unsuccessful"),
-        )
-    if missing_inputs:
-        return FormulaResult(
-            success=False,
-            answer=None,
-            formula=None,
-            inputs={},
-            round_to=_infer_round_to(question),
-            unit=_infer_unit(question),
-            required_inputs=required_inputs,
-            missing_inputs=missing_inputs,
-            reason=reason,
-            error="calculation plan marked successful despite missing inputs",
+            error="; ".join(error_parts),
         )
 
-    inputs = _normalize_inputs(plan.get("inputs"))
+    # The executable variable map is always rebuilt from required_inputs, so the
+    # values used for computation are exactly the ones that were extracted and
+    # source-verified above.
+    inputs = _derive_inputs_from_required(required_inputs)
+    if not inputs:
+        return FormulaResult(
+            success=False,
+            answer=None,
+            formula=None,
+            inputs={},
+            round_to=round_to_default,
+            unit=unit_default,
+            required_inputs=required_inputs,
+            missing_inputs=missing_inputs,
+            reason=reason,
+            error="no usable numeric inputs",
+        )
+
     formula = plan.get("formula")
     if not isinstance(formula, str) or not formula.strip():
-        raise ValueError("formula must be a non-empty string")
+        # Inputs are present but the model produced no executable formula. Signal
+        # this distinctly so the caller can attempt a focused formula repair.
+        return FormulaResult(
+            success=False,
+            answer=None,
+            formula=None,
+            inputs=inputs,
+            round_to=round_to_default,
+            unit=unit_default,
+            required_inputs=required_inputs,
+            missing_inputs=missing_inputs,
+            reason=reason,
+            error="missing formula",
+        )
     formula = formula.strip()
 
     round_to_raw = plan.get("round_to")
-    round_to = int(round_to_raw) if isinstance(round_to_raw, (int, float)) else _infer_round_to(question)
+    round_to = (
+        int(round_to_raw)
+        if isinstance(round_to_raw, (int, float)) and not isinstance(round_to_raw, bool)
+        else round_to_default
+    )
     round_to = max(0, min(round_to, 6))
     llm_unit = str(plan.get("unit") or "").strip().lower()
-    inferred_unit = _infer_unit(question)
     if _explicit_percent_request(question) or _is_margin_question(question):
         unit = "percent"
     elif _is_plain_ratio_question(question):
@@ -395,7 +488,7 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
     elif llm_unit in {"plain", "percent", "usd_millions", "usd_billions", "usd_thousands", "other"}:
         unit = llm_unit
     else:
-        unit = inferred_unit
+        unit = unit_default
 
     parsed = ast.parse(formula, mode="eval")
     _validate_formula_ast(parsed, allowed_names=set(inputs))
@@ -440,6 +533,65 @@ def generate_calculation_prompt(question: str, current_answer: Any, evidence: st
     )
 
 
+_FORMULA_REPAIR_PROMPT = """You are a financial calculation planner. The numeric inputs have ALREADY been extracted and verified. Do NOT re-extract, change, add, or remove any value.
+
+Your only job: write the arithmetic formula that combines the given variables into the final answer the question asks for.
+
+Rules:
+- "formula" may reference ONLY the provided variable names and use + - * / ** ( ) and round/abs/min/max.
+- The formula must compute the final answer requested by the question.
+- For a percentage / margin / "% of revenue" question, multiply by 100 and set unit="percent".
+- For a plain ratio (e.g. current ratio, x times), set unit="plain".
+- Otherwise keep the monetary unit of the inputs.
+- Use the rounding the question asks for; if unstated, use 2 decimals.
+
+Return JSON ONLY:
+{{
+  "formula": "arithmetic expression using the variable names",
+  "round_to": integer,
+  "unit": "plain|percent|usd_millions|usd_billions|usd_thousands|other"
+}}
+
+Question:
+{question}
+
+Available variables (name = value):
+{variables}
+"""
+
+
+def _repair_missing_formula(
+    llm: Any,
+    question: str,
+    plan: dict[str, Any],
+    result: FormulaResult,
+) -> tuple[FormulaResult | None, str | None]:
+    """Focused second call: inputs are present but no executable formula was
+    produced. Ask the model for the formula only, reusing the extracted values."""
+    variables = "\n".join(f"{name} = {value}" for name, value in result.inputs.items())
+    repair_prompt = _FORMULA_REPAIR_PROMPT.format(question=question, variables=variables)
+    response = llm.invoke(repair_prompt)
+    raw = response.content if hasattr(response, "content") else str(response)
+    repair_json = _extract_json_object(raw or "")
+    if not repair_json:
+        return None, None
+    repair_plan = json.loads(_strip_json_line_comments(repair_json))
+    formula = repair_plan.get("formula")
+    if not isinstance(formula, str) or not formula.strip():
+        return None, None
+    # evaluate_formula_plan re-derives inputs/missing_inputs from required_inputs,
+    # so we only need to supply the freshly repaired formula and presentation hints.
+    merged_plan = {
+        "required_inputs": plan.get("required_inputs"),
+        "formula": formula,
+        "round_to": repair_plan.get("round_to", plan.get("round_to")),
+        "unit": repair_plan.get("unit", plan.get("unit")),
+        "reason": plan.get("reason"),
+    }
+    repaired = evaluate_formula_plan(merged_plan, question=question)
+    return repaired, format_calculation_answer(repaired)
+
+
 def run_calculation_pipeline(
     llm: Any,
     question: str,
@@ -473,6 +625,17 @@ def run_calculation_pipeline(
             "calculation_error": str(exc),
             "calculation_raw_response": raw_response,
         }
+
+    # Inputs were extracted but the model produced no executable formula: try one
+    # focused repair call rather than discarding an otherwise-complete extraction.
+    if not result.success and result.error == "missing formula" and result.inputs:
+        try:
+            repaired, repaired_answer = _repair_missing_formula(llm, question, plan, result)
+            if repaired is not None and repaired.success and repaired_answer is not None:
+                result = repaired
+                answer = repaired_answer
+        except Exception:
+            pass  # keep the original "missing formula" failure
 
     return {
         "calculation_success": bool(result.success and answer is not None),
