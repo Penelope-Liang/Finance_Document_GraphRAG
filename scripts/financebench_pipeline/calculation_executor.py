@@ -66,6 +66,82 @@ CRITICAL unit rules:
 - If monetary values have different scales (thousands vs millions vs billions),
   normalize them to the same scale before computing.
 
+When deriving the formula, think in terms of simple Python assignments, but do
+NOT output Python code. Output the JSON schema below only. The examples below
+are fictional and only show how to translate financial questions into
+executable arithmetic formulas:
+
+Example 1:
+Question: What is Horizon Parts' FY2024 free cash flow in USD millions? Free
+cash flow is defined as cash from operations minus capital expenditures.
+Evidence: Net cash provided by operating activities was $1,240 million in
+FY2024. Capital expenditures were $315 million in FY2024.
+Formula derivation:
+cash_from_operations_2024 = 1240
+capital_expenditures_2024 = 315
+ans = cash_from_operations_2024 - capital_expenditures_2024
+JSON plan:
+{{
+  "required_inputs": [
+    {{"name": "FY2024 cash from operations", "variable": "cash_from_operations_2024", "value": 1240, "unit": "million", "period": "FY2024", "source_text": "Net cash provided by operating activities was $1,240 million in FY2024."}},
+    {{"name": "FY2024 capital expenditures", "variable": "capital_expenditures_2024", "value": 315, "unit": "million", "period": "FY2024", "source_text": "Capital expenditures were $315 million in FY2024."}}
+  ],
+  "formula": "cash_from_operations_2024 - capital_expenditures_2024",
+  "round_to": 2,
+  "unit": "usd_millions",
+  "reason": "Free cash flow equals cash from operations minus capital expenditures, with both inputs in millions."
+}}
+
+Example 2:
+Question: What is Northstar Retail's FY2023 inventory turnover ratio? Inventory
+turnover is defined as FY2023 cost of sales divided by average inventory between
+FY2022 and FY2023. Round to two decimal places.
+Evidence: Cost of sales was $8,400 million in FY2023. Inventories were $1,180
+million in FY2023 and $1,220 million in FY2022.
+Formula derivation:
+cost_of_sales_2023 = 8400
+inventory_2023 = 1180
+inventory_2022 = 1220
+average_inventory = (inventory_2023 + inventory_2022) / 2
+ans = cost_of_sales_2023 / average_inventory
+JSON plan:
+{{
+  "required_inputs": [
+    {{"name": "FY2023 cost of sales", "variable": "cost_of_sales_2023", "value": 8400, "unit": "million", "period": "FY2023", "source_text": "Cost of sales was $8,400 million in FY2023."}},
+    {{"name": "FY2023 inventory", "variable": "inventory_2023", "value": 1180, "unit": "million", "period": "FY2023", "source_text": "Inventories were $1,180 million in FY2023."}},
+    {{"name": "FY2022 inventory", "variable": "inventory_2022", "value": 1220, "unit": "million", "period": "FY2022", "source_text": "Inventories were $1,220 million in FY2022."}}
+  ],
+  "formula": "cost_of_sales_2023 / ((inventory_2023 + inventory_2022) / 2)",
+  "round_to": 2,
+  "unit": "plain",
+  "reason": "Inventory turnover is a plain ratio, not a percent, and average inventory is computed inside the formula."
+}}
+
+Example 3:
+Question: What is Meridian Software's FY2024 EBITDA margin? Define EBITDA as
+operating income plus depreciation and amortization. Answer in percents and
+round to one decimal place.
+Evidence: Revenue was $5,600 million in FY2024. Operating income was $840
+million. Depreciation and amortization was $210 million.
+Formula derivation:
+revenue_2024 = 5600
+operating_income_2024 = 840
+depreciation_and_amortization_2024 = 210
+ebitda_2024 = operating_income_2024 + depreciation_and_amortization_2024
+ans = ebitda_2024 / revenue_2024 * 100
+JSON plan:
+{{
+  "required_inputs": [
+    {{"name": "FY2024 revenue", "variable": "revenue_2024", "value": 5600, "unit": "million", "period": "FY2024", "source_text": "Revenue was $5,600 million in FY2024."}},
+    {{"name": "FY2024 operating income", "variable": "operating_income_2024", "value": 840, "unit": "million", "period": "FY2024", "source_text": "Operating income was $840 million."}},
+    {{"name": "FY2024 depreciation and amortization", "variable": "depreciation_and_amortization_2024", "value": 210, "unit": "million", "period": "FY2024", "source_text": "Depreciation and amortization was $210 million."}}
+  ],
+  "formula": "(operating_income_2024 + depreciation_and_amortization_2024) / revenue_2024 * 100",
+  "round_to": 1,
+  "unit": "percent",
+  "reason": "EBITDA margin is EBITDA divided by revenue, multiplied by 100 because the question asks for percents."
+}}
+
 Return this schema:
 {{
   "required_inputs": [
