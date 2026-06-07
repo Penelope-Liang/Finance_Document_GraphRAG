@@ -146,7 +146,7 @@ def _evaluate_ragas_retrieval(samples, chat_deployment, embedding_deployment, te
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics.collections import context_precision, context_recall
+        from ragas.metrics import context_precision, context_recall
     except ImportError as exc:
         raise ImportError("Retrieval evaluation requires: pip install -e '.[evaluation]'") from exc
 

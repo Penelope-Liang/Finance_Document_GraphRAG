@@ -94,7 +94,7 @@ def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deploymen
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics.collections import answer_accuracy, faithfulness
+        from ragas.metrics import AnswerAccuracy, faithfulness
     except ImportError as exc:
         raise ImportError("Answer quality evaluation requires: pip install -e '.[evaluation]'") from exc
 
@@ -105,7 +105,7 @@ def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deploymen
     )
     result = evaluate(
         Dataset.from_list(samples),
-        metrics=[_init_metric(faithfulness), _init_metric(answer_accuracy)],
+        metrics=[_init_metric(faithfulness), AnswerAccuracy()],
         llm=llm,
         embeddings=embeddings,
     )
@@ -115,7 +115,9 @@ def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deploymen
         output.append(
             {
                 "faithfulness_score": _nan_to_none(row.get("faithfulness")),
-                "answer_accuracy": _nan_to_none(row.get("answer_accuracy")),
+                "answer_accuracy": _nan_to_none(
+                    row.get("nv_accuracy", row.get("answer_accuracy"))
+                ),
             }
         )
     return output
