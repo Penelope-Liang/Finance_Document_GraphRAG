@@ -7,7 +7,7 @@ import string
 from collections import Counter
 from pathlib import Path
 
-from evaluate_correctness import _build_ragas_azure_components
+from ragas_components import build_ragas_azure_components
 
 
 ARTICLES_REGEX = re.compile(r"\b(a|an|the)\b", re.UNICODE)
@@ -127,6 +127,18 @@ def _nan_to_none(value):
     return number
 
 
+def _init_metric(metric):
+    if hasattr(metric, "required_columns"):
+        return metric
+    if isinstance(metric, type):
+        return metric()
+    if callable(metric):
+        candidate = metric()
+        if hasattr(candidate, "required_columns"):
+            return candidate
+    return metric
+
+
 def _evaluate_ragas_retrieval(samples, chat_deployment, embedding_deployment, temperature):
     if not samples:
         return []
@@ -138,14 +150,14 @@ def _evaluate_ragas_retrieval(samples, chat_deployment, embedding_deployment, te
     except ImportError as exc:
         raise ImportError("Retrieval evaluation requires: pip install -e '.[evaluation]'") from exc
 
-    llm, embeddings = _build_ragas_azure_components(
+    llm, embeddings = build_ragas_azure_components(
         chat_deployment=chat_deployment,
         embedding_deployment=embedding_deployment,
         temperature=temperature,
     )
     result = evaluate(
         Dataset.from_list(samples),
-        metrics=[context_precision, context_recall],
+        metrics=[_init_metric(context_precision), _init_metric(context_recall)],
         llm=llm,
         embeddings=embeddings,
     )

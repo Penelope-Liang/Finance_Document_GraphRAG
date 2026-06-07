@@ -7,7 +7,7 @@ The project focuses on evidence construction for financial reports. It parses PD
 ## Main Components
 
 - `scripts/main.py`: main QA runner for both RAG and GraphRAG experiments.
-- `scripts/evaluate_correctness.py`: answer correctness evaluator using token-level answer recall and RAGAS `answer_correctness`.
+- `scripts/evaluate_answer.py`: answer evaluator using RAGAS `faithfulness` and `answer_accuracy`.
 - `scripts/financebench_pipeline/`: FinanceBench-specific routing, prompts, and calculation executor.
 - `src/neo4j_graphrag/preprocess/`: PDF element processing, section-aware chunking, and table-cell extraction.
 - `src/neo4j_graphrag/tools/build_graph.py`: imports chunks into the Neo4j financial document graph.
@@ -124,15 +124,15 @@ PYTHONPATH=src:scripts python -u scripts/main.py \
 Evaluate generated answers:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/evaluate_correctness.py \
+PYTHONPATH=src:scripts python -u scripts/evaluate_answer.py \
   --input output/graphrag_results.json \
-  --output output/graphrag_results_correctness.json \
+  --output output/graphrag_results_answer_eval.json \
   --judge-model gpt-4.1-mini \
   --embedding-model text-embedding-3-small \
   --overwrite
 ```
 
-This evaluator writes `correctness_evaluation` to each result row. The primary metric is `correctness_coefficient`, computed with RAGAS `answer_correctness`; `answer_recall` is reported as an auxiliary token-level lexical recall metric.
+This evaluator writes `answer_quality_evaluation` to each result row. The primary metrics are RAGAS `faithfulness`, which checks whether the answer is supported by retrieved context, and RAGAS `answer_accuracy`, which compares the generated answer against the reference answer.
 
 ## Archived Preprocessing and Graph Import
 

@@ -4,7 +4,7 @@ import math
 import os
 from pathlib import Path
 
-from evaluate_correctness import _build_ragas_azure_components
+from ragas_components import build_ragas_azure_components
 
 
 def _load_rows(path):
@@ -75,6 +75,18 @@ def _nan_to_none(value):
     return number
 
 
+def _init_metric(metric):
+    if hasattr(metric, "required_columns"):
+        return metric
+    if isinstance(metric, type):
+        return metric()
+    if callable(metric):
+        candidate = metric()
+        if hasattr(candidate, "required_columns"):
+            return candidate
+    return metric
+
+
 def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deployment, temperature):
     if not samples:
         return []
@@ -86,14 +98,14 @@ def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deploymen
     except ImportError as exc:
         raise ImportError("Answer quality evaluation requires: pip install -e '.[evaluation]'") from exc
 
-    llm, embeddings = _build_ragas_azure_components(
+    llm, embeddings = build_ragas_azure_components(
         chat_deployment=chat_deployment,
         embedding_deployment=embedding_deployment,
         temperature=temperature,
     )
     result = evaluate(
         Dataset.from_list(samples),
-        metrics=[faithfulness, answer_accuracy],
+        metrics=[_init_metric(faithfulness), _init_metric(answer_accuracy)],
         llm=llm,
         embeddings=embeddings,
     )
