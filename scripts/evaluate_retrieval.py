@@ -1,24 +1,23 @@
-from __future__ import annotations
-
 import argparse
 import json
 import math
 import os
 import re
+import string
+from collections import Counter
 from pathlib import Path
-from typing import Any
 
 from evaluate_correctness import _build_ragas_azure_components
 
 
-TOKEN_RE = re.compile(r"[a-z]+|\d+(?:\.\d+)?|%")
+ARTICLES_REGEX = re.compile(r"\b(a|an|the)\b", re.UNICODE)
 
 
-def _load_rows(path: Path) -> list[dict[str, Any]]:
+def _load_rows(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _save_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+def _save_rows(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(rows, indent=2, ensure_ascii=False, allow_nan=False),
@@ -26,50 +25,44 @@ def _save_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     )
 
 
-def _normalize_text(value: Any) -> str:
-    text = "" if value is None else str(value)
-    text = text.lower()
-    text = text.replace("$", " ")
-    text = text.replace(",", "")
-    text = text.replace("(", " ")
-    text = text.replace(")", " ")
-    text = text.replace("%", " % ")
-    return text
+def normalize_evidence(s):
+    """Lower text and remove punctuation, articles and extra whitespace."""
+
+    def remove_articles(text):
+        return ARTICLES_REGEX.sub(" ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(str(s or "")))))
 
 
-def _tokens(value: Any) -> set[str]:
-    return set(TOKEN_RE.findall(_normalize_text(value)))
+def get_tokens(s):
+    if not s:
+        return []
+    return normalize_evidence(s).split()
 
 
-def _f1(a: Any, b: Any) -> float | None:
-    a_tokens = _tokens(a)
-    b_tokens = _tokens(b)
-    if not a_tokens or not b_tokens:
+def context_token_recall_at_k(gold_evidence, contexts):
+    gold_tokens = get_tokens(gold_evidence)
+    if not gold_tokens:
         return None
-    overlap = len(a_tokens & b_tokens)
-    if overlap == 0:
+    retrieved_tokens = get_tokens(" ".join(contexts))
+    if not retrieved_tokens:
         return 0.0
-    precision = overlap / len(a_tokens)
-    recall = overlap / len(b_tokens)
-    return 2 * precision * recall / (precision + recall)
+    common = Counter(gold_tokens) & Counter(retrieved_tokens)
+    overlap = sum(common.values())
+    return overlap / len(gold_tokens)
 
 
-def _recall(covered_by: Any, target: Any) -> float | None:
-    source_tokens = _tokens(covered_by)
-    target_tokens = _tokens(target)
-    if not target_tokens:
-        return None
-    if not source_tokens:
-        return 0.0
-    return len(source_tokens & target_tokens) / len(target_tokens)
-
-
-def _selected_rows(
-    rows: list[dict[str, Any]],
-    *,
-    question_ids: set[str],
-    limit: int,
-) -> list[tuple[int, dict[str, Any]]]:
+def _selected_rows(rows, question_ids, limit):
     selected = [
         (idx, row)
         for idx, row in enumerate(rows)
@@ -80,7 +73,7 @@ def _selected_rows(
     return selected
 
 
-def _context_text(context: Any) -> str:
+def _context_text(context):
     if isinstance(context, str):
         return context
     if isinstance(context, dict):
@@ -91,13 +84,7 @@ def _context_text(context: Any) -> str:
     return str(context or "")
 
 
-def _context_texts(
-    row: dict[str, Any],
-    *,
-    context_field: str,
-    max_contexts: int,
-    max_context_chars: int,
-) -> list[str]:
+def _context_texts(row, context_field, max_contexts, max_context_chars):
     contexts = row.get(context_field)
     if contexts is None and context_field != "final_context":
         contexts = row.get("final_context")
@@ -105,7 +92,8 @@ def _context_texts(
         contexts = row.get("retrieved_contexts")
     if not isinstance(contexts, list):
         return []
-    output: list[str] = []
+
+    output = []
     for context in contexts[:max_contexts]:
         text = _context_text(context).strip()
         if not text:
@@ -116,7 +104,7 @@ def _context_texts(
     return output
 
 
-def _reference_text(row: dict[str, Any]) -> str:
+def _reference_text(row):
     parts = [
         row.get("gold_answer"),
         row.get("gold_justification"),
@@ -125,7 +113,7 @@ def _reference_text(row: dict[str, Any]) -> str:
     return "\n".join(str(part) for part in parts if part)
 
 
-def _nan_to_none(value: Any) -> float | None:
+def _nan_to_none(value):
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):
@@ -139,15 +127,14 @@ def _nan_to_none(value: Any) -> float | None:
     return number
 
 
-def _evaluate_ragas_retrieval(samples: list[dict[str, Any]], *, chat_deployment: str,
-    embedding_deployment: str, temperature: float) -> list[dict[str, float | None]]:
+def _evaluate_ragas_retrieval(samples, chat_deployment, embedding_deployment, temperature):
     if not samples:
         return []
 
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics import (answer_relevancy, context_precision, context_recall, faithfulness)
+        from ragas.metrics.collections import context_precision, context_recall
     except ImportError as exc:
         raise ImportError("Retrieval evaluation requires: pip install -e '.[evaluation]'") from exc
 
@@ -158,19 +145,15 @@ def _evaluate_ragas_retrieval(samples: list[dict[str, Any]], *, chat_deployment:
     )
     result = evaluate(
         Dataset.from_list(samples),
-        metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+        metrics=[context_precision, context_recall],
         llm=llm,
         embeddings=embeddings,
     )
     frame = result.to_pandas()
-    output: list[dict[str, float | None]] = []
+    output = []
     for _, row in frame.iterrows():
         output.append(
             {
-                "faithfulness": _nan_to_none(row.get("faithfulness")),
-                "answer_relevance": _nan_to_none(
-                    row.get("answer_relevancy", row.get("answer_relevance"))
-                ),
                 "context_precision": _nan_to_none(row.get("context_precision")),
                 "context_recall": _nan_to_none(row.get("context_recall")),
             }
@@ -178,53 +161,20 @@ def _evaluate_ragas_retrieval(samples: list[dict[str, Any]], *, chat_deployment:
     return output
 
 
-def _evaluate_lexical_proxy(
-    *,
-    question: Any,
-    answer: Any,
-    reference: str,
-    contexts: list[str],
-) -> dict[str, float | None]:
-    context_text = "\n".join(contexts)
-    relevance_values = [
-        score
-        for context in contexts
-        if (score := _f1(context, reference)) is not None
-    ]
-    relevant = [score for score in relevance_values if score > 0]
-    precision_at_relevant_ranks: list[float] = []
-    relevant_so_far = 0
-    for rank, score in enumerate(relevance_values, start=1):
-        if score > 0:
-            relevant_so_far += 1
-            precision_at_relevant_ranks.append(relevant_so_far / rank)
+def _evaluate_token_recall(reference, contexts):
     return {
-        "faithfulness": _recall(context_text, answer),
-        "answer_relevance": _f1(answer, question),
-        "context_precision": (
-            sum(precision_at_relevant_ranks) / len(precision_at_relevant_ranks)
-            if precision_at_relevant_ranks
-            else 0.0
-        ),
-        "context_recall": _recall(context_text, reference),
-        "lexical_relevant_contexts": len(relevant),
+        "context_token_recall": context_token_recall_at_k(reference, contexts),
     }
 
 
-def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _summary(rows):
     evaluations = [
         row.get("retrieval_evaluation") or {}
         for row in rows
         if row.get("retrieval_evaluation") is not None
     ]
-    metrics = [
-        "faithfulness",
-        "answer_relevance",
-        "context_precision",
-        "context_recall",
-    ]
-    summary: dict[str, Any] = {"evaluated": len(evaluations)}
-    for metric in metrics:
+    summary = {"evaluated": len(evaluations)}
+    for metric in ("context_precision", "context_recall", "context_token_recall"):
         values = [
             item.get(metric)
             for item in evaluations
@@ -234,23 +184,20 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate RAG output quality with faithfulness, answer relevance, "
-            "context precision, and context recall."
+            "Evaluate retrieval quality with RAGAS context precision/recall "
+            "or lexical Context Token Recall@K."
         )
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--mode",
-        choices=["ragas", "lexical"],
+        choices=["ragas", "token_recall"],
         default="ragas",
-        help=(
-            "ragas uses LLM/embedding metrics for paper results; lexical is a "
-            "cheap smoke-test proxy only."
-        ),
+        help="ragas uses LLM judge metrics; token_recall uses SQuAD-style token overlap.",
     )
     parser.add_argument(
         "--context-field",
@@ -269,7 +216,7 @@ def main() -> None:
     parser.add_argument(
         "--embedding-model",
         default=os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""),
-        help="Azure OpenAI embedding deployment used by answer relevance.",
+        help="Azure OpenAI embedding deployment used by RAGAS metrics.",
     )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--limit", type=int, default=0)
@@ -283,14 +230,10 @@ def main() -> None:
     args = parser.parse_args()
 
     rows = _load_rows(args.input)
-    selected = _selected_rows(
-        rows,
-        question_ids=set(args.question_id),
-        limit=args.limit,
-    )
+    selected = _selected_rows(rows, set(args.question_id), args.limit)
 
-    ragas_samples: list[dict[str, Any]] = []
-    ragas_row_indices: list[int] = []
+    ragas_samples = []
+    ragas_row_indices = []
 
     for row_index, row in selected:
         if row.get("retrieval_evaluation") and not args.overwrite:
@@ -304,10 +247,9 @@ def main() -> None:
         )
         reference = _reference_text(row)
         row["retrieval_evaluation"] = {
-            "faithfulness": None,
-            "answer_relevance": None,
             "context_precision": None,
             "context_recall": None,
+            "context_token_recall": None,
             "metric_backend": args.mode,
             "judge_model": args.judge_model if args.mode == "ragas" else None,
             "embedding_model": args.embedding_model if args.mode == "ragas" else None,
@@ -315,27 +257,15 @@ def main() -> None:
             "contexts_used": len(contexts),
         }
 
-        if args.mode == "lexical":
-            row["retrieval_evaluation"].update(
-                _evaluate_lexical_proxy(
-                    question=row.get("question"),
-                    answer=row.get("answer"),
-                    reference=reference,
-                    contexts=contexts,
-                )
-            )
+        if args.mode == "token_recall":
+            row["retrieval_evaluation"].update(_evaluate_token_recall(reference, contexts))
             continue
 
-        if not row.get("answer"):
-            row["retrieval_evaluation"]["note"] = "Candidate answer is missing."
-            continue
         if not contexts:
             row["retrieval_evaluation"]["note"] = "Retrieved contexts are missing."
             continue
         if not reference:
-            row["retrieval_evaluation"]["note"] = (
-                "Reference text is missing; context precision/recall may fail."
-            )
+            row["retrieval_evaluation"]["note"] = "Reference text is missing."
 
         ragas_row_indices.append(row_index)
         ragas_samples.append(
@@ -350,8 +280,7 @@ def main() -> None:
     if args.mode == "ragas" and ragas_samples:
         if not args.embedding_model:
             raise ValueError(
-                "Missing --embedding-model or AZURE_OPENAI_EMBEDDING_DEPLOYMENT. "
-                "RAGAS answer_relevancy requires embeddings."
+                "Missing --embedding-model or AZURE_OPENAI_EMBEDDING_DEPLOYMENT."
             )
         scores = _evaluate_ragas_retrieval(
             ragas_samples,
