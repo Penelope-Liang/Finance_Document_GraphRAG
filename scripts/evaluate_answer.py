@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import os
+import warnings
 from pathlib import Path
 
 from ragas_components import build_ragas_azure_components
@@ -94,7 +95,13 @@ def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deploymen
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics import AnswerAccuracy, faithfulness
+
+        # The legacy ragas.metrics objects are intentionally used because the
+        # ragas.metrics.collections (v2) metrics are not compatible with the
+        # legacy evaluate() API in this ragas version.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from ragas.metrics import AnswerAccuracy, faithfulness
     except ImportError as exc:
         raise ImportError("Answer quality evaluation requires: pip install -e '.[evaluation]'") from exc
 

@@ -1,23 +1,19 @@
 import argparse
+import asyncio
 import json
 import math
 import os
-import re
-import string
-from collections import Counter
+import warnings
 from pathlib import Path
 
-from ragas_components import build_ragas_azure_components
+from ragas_components import build_ragas_v2_llm
 
 
-ARTICLES_REGEX = re.compile(r"\b(a|an|the)\b", re.UNICODE)
-
-
-def _load_rows(path):
+def load_rows(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _save_rows(path, rows):
+def save_rows(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(rows, indent=2, ensure_ascii=False, allow_nan=False),
@@ -25,44 +21,127 @@ def _save_rows(path, rows):
     )
 
 
-def normalize_evidence(s):
-    """Lower text and remove punctuation, articles and extra whitespace."""
-
-    def remove_articles(text):
-        return ARTICLES_REGEX.sub(" ", text)
-
-    def white_space_fix(text):
-        return " ".join(text.split())
-
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return "".join(ch for ch in text if ch not in exclude)
-
-    def lower(text):
-        return text.lower()
-
-    return white_space_fix(remove_articles(remove_punc(lower(str(s or "")))))
+def context_text(context):
+    if isinstance(context, str):
+        return context.strip()
+    if isinstance(context, dict):
+        return str(context.get("text") or "").strip()
+    return str(context or "").strip()
 
 
-def get_tokens(s):
-    if not s:
+def get_retrieved_contexts(row, max_contexts, max_context_chars):
+    contexts = row.get("retrieved_contexts") or []
+    if not isinstance(contexts, list):
         return []
-    return normalize_evidence(s).split()
+
+    output = []
+    for context in contexts[:max_contexts]:
+        text = context_text(context)
+        if not text:
+            continue
+        if max_context_chars > 0:
+            text = text[:max_context_chars]
+        output.append(text)
+    return output
 
 
-def context_token_recall_at_k(gold_evidence, contexts):
-    gold_tokens = get_tokens(gold_evidence)
-    if not gold_tokens:
+def evidence_text(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        output = []
+        for item in value:
+            output.extend(evidence_text(item))
+        return output
+    if isinstance(value, dict):
+        for key in ("evidence_text", "text", "content", "evidence", "gold_evidence"):
+            texts = evidence_text(value.get(key))
+            if texts:
+                return texts
+        return []
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def get_reference_contexts(row):
+    return evidence_text(row.get("gold_evidence"))
+
+
+def clean_score(value):
+    if value is None:
         return None
-    retrieved_tokens = get_tokens(" ".join(contexts))
-    if not retrieved_tokens:
-        return 0.0
-    common = Counter(gold_tokens) & Counter(retrieved_tokens)
-    overlap = sum(common.values())
-    return overlap / len(gold_tokens)
+    result = getattr(value, "value", value)
+    if isinstance(result, float) and math.isnan(result):
+        return None
+    try:
+        number = float(result)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number):
+        return None
+    return number
 
 
-def _selected_rows(rows, question_ids, limit):
+async def score_llm_context_recall(scorer, question, gold_answer, retrieved):
+    return await scorer.ascore(
+        user_input=question,
+        reference=gold_answer,
+        retrieved_contexts=retrieved,
+    )
+
+
+async def score_nonllm_context_recall(scorer, retrieved, reference_contexts):
+    from ragas.dataset_schema import SingleTurnSample
+
+    sample = SingleTurnSample(
+        retrieved_contexts=retrieved,
+        reference_contexts=reference_contexts,
+    )
+    return await scorer.single_turn_ascore(sample)
+
+
+async def evaluate_samples(samples, judge_model, temperature):
+    try:
+        from ragas.metrics.collections import ContextRecall
+
+        # NonLLMContextRecall only lives in the legacy namespace; silence its
+        # deprecation warning. It is non-LLM (string distance) and needs no LLM.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from ragas.metrics import NonLLMContextRecall
+    except ImportError as exc:
+        raise ImportError("Retrieval evaluation requires ragas.") from exc
+
+    llm = build_ragas_v2_llm(judge_model, temperature=temperature)
+    llm_scorer = ContextRecall(llm=llm)
+    nonllm_scorer = NonLLMContextRecall()
+
+    results = []
+    for sample in samples:
+        llm_score = await score_llm_context_recall(
+            llm_scorer,
+            question=sample["question"],
+            gold_answer=sample["gold_answer"],
+            retrieved=sample["retrieved_contexts"],
+        )
+        nonllm_score = await score_nonllm_context_recall(
+            nonllm_scorer,
+            retrieved=sample["retrieved_contexts"],
+            reference_contexts=sample["reference_contexts"],
+        )
+        results.append(
+            {
+                "llm_context_recall": clean_score(llm_score),
+                "nonllm_context_recall": clean_score(nonllm_score),
+            }
+        )
+    return results
+
+
+def selected_rows(rows, question_ids, limit):
     selected = [
         (idx, row)
         for idx, row in enumerate(rows)
@@ -73,149 +152,34 @@ def _selected_rows(rows, question_ids, limit):
     return selected
 
 
-def _context_text(context):
-    if isinstance(context, str):
-        return context
-    if isinstance(context, dict):
-        for key in ("text", "content", "page_content"):
-            value = context.get(key)
-            if value:
-                return str(value)
-    return str(context or "")
-
-
-def _context_texts(row, context_field, max_contexts, max_context_chars):
-    contexts = row.get(context_field)
-    if contexts is None and context_field != "final_context":
-        contexts = row.get("final_context")
-    if contexts is None and context_field != "retrieved_contexts":
-        contexts = row.get("retrieved_contexts")
-    if not isinstance(contexts, list):
-        return []
-
-    output = []
-    for context in contexts[:max_contexts]:
-        text = _context_text(context).strip()
-        if not text:
-            continue
-        if max_context_chars > 0:
-            text = text[:max_context_chars]
-        output.append(text)
-    return output
-
-
-def _reference_text(row):
-    parts = [
-        row.get("gold_answer"),
-        row.get("gold_justification"),
-        row.get("gold_evidence"),
+def mean_metric(evaluations, key):
+    values = [
+        item.get(key)
+        for item in evaluations
+        if item.get(key) is not None
     ]
-    return "\n".join(str(part) for part in parts if part)
+    return sum(values) / len(values) if values else None
 
 
-def _nan_to_none(value):
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if math.isnan(number):
-        return None
-    return number
-
-
-def _init_metric(metric):
-    if hasattr(metric, "required_columns"):
-        return metric
-    if isinstance(metric, type):
-        return metric()
-    if callable(metric):
-        candidate = metric()
-        if hasattr(candidate, "required_columns"):
-            return candidate
-    return metric
-
-
-def _evaluate_ragas_retrieval(samples, chat_deployment, embedding_deployment, temperature):
-    if not samples:
-        return []
-
-    try:
-        from datasets import Dataset
-        from ragas import evaluate
-        from ragas.metrics import context_precision, context_recall
-    except ImportError as exc:
-        raise ImportError("Retrieval evaluation requires: pip install -e '.[evaluation]'") from exc
-
-    llm, embeddings = build_ragas_azure_components(
-        chat_deployment=chat_deployment,
-        embedding_deployment=embedding_deployment,
-        temperature=temperature,
-    )
-    result = evaluate(
-        Dataset.from_list(samples),
-        metrics=[_init_metric(context_precision), _init_metric(context_recall)],
-        llm=llm,
-        embeddings=embeddings,
-    )
-    frame = result.to_pandas()
-    output = []
-    for _, row in frame.iterrows():
-        output.append(
-            {
-                "context_precision": _nan_to_none(row.get("context_precision")),
-                "context_recall": _nan_to_none(row.get("context_recall")),
-            }
-        )
-    return output
-
-
-def _evaluate_token_recall(reference, contexts):
-    return {
-        "context_token_recall": context_token_recall_at_k(reference, contexts),
-    }
-
-
-def _summary(rows):
+def summary(rows):
     evaluations = [
         row.get("retrieval_evaluation") or {}
         for row in rows
         if row.get("retrieval_evaluation") is not None
     ]
-    summary = {"evaluated": len(evaluations)}
-    for metric in ("context_precision", "context_recall", "context_token_recall"):
-        values = [
-            item.get(metric)
-            for item in evaluations
-            if item.get(metric) is not None
-        ]
-        summary[f"mean_{metric}"] = sum(values) / len(values) if values else None
-    return summary
+    return {
+        "evaluated": len(evaluations),
+        "mean_llm_context_recall": mean_metric(evaluations, "llm_context_recall"),
+        "mean_nonllm_context_recall": mean_metric(evaluations, "nonllm_context_recall"),
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description=(
-            "Evaluate retrieval quality with RAGAS context precision/recall "
-            "or lexical Context Token Recall@K."
-        )
+        description="Evaluate retrieval context recall with LLM and non-LLM RAGAS metrics."
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument(
-        "--mode",
-        choices=["ragas", "token_recall"],
-        default="ragas",
-        help="ragas uses LLM judge metrics; token_recall uses SQuAD-style token overlap.",
-    )
-    parser.add_argument(
-        "--context-field",
-        default="retrieved_contexts",
-        help="Field containing retrieved contexts. Falls back to final_context.",
-    )
     parser.add_argument("--max-contexts", type=int, default=10)
     parser.add_argument("--max-context-chars", type=int, default=2000)
     parser.add_argument(
@@ -223,88 +187,81 @@ def main():
         default=os.environ.get("AZURE_OPENAI_DEPLOYMENT")
         or os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT")
         or "gpt-4.1-mini",
-        help="Azure OpenAI chat deployment used by RAGAS metrics.",
     )
     parser.add_argument(
         "--embedding-model",
         default=os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""),
-        help="Azure OpenAI embedding deployment used by RAGAS metrics.",
+        help="Ignored: context recall metrics do not use embeddings. Kept for CLI compatibility.",
     )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument(
-        "--question-id",
-        action="append",
-        default=[],
-        help="Question ID to evaluate. Can be passed multiple times. Defaults to all rows.",
-    )
+    parser.add_argument("--question-id", action="append", default=[])
     args = parser.parse_args()
 
-    rows = _load_rows(args.input)
-    selected = _selected_rows(rows, set(args.question_id), args.limit)
+    rows = load_rows(args.input)
+    samples = []
+    row_indices = []
 
-    ragas_samples = []
-    ragas_row_indices = []
-
-    for row_index, row in selected:
+    for row_index, row in selected_rows(rows, set(args.question_id), args.limit):
         if row.get("retrieval_evaluation") and not args.overwrite:
             continue
 
-        contexts = _context_texts(
+        question = str(row.get("question") or "").strip()
+        gold_answer = str(row.get("gold_answer") or "").strip()
+        retrieved = get_retrieved_contexts(
             row,
-            context_field=args.context_field,
             max_contexts=args.max_contexts,
             max_context_chars=args.max_context_chars,
         )
-        reference = _reference_text(row)
+        reference_contexts = get_reference_contexts(row)
+
         row["retrieval_evaluation"] = {
-            "context_precision": None,
-            "context_recall": None,
-            "context_token_recall": None,
-            "metric_backend": args.mode,
-            "judge_model": args.judge_model if args.mode == "ragas" else None,
-            "embedding_model": args.embedding_model if args.mode == "ragas" else None,
-            "context_field": args.context_field,
-            "contexts_used": len(contexts),
+            "llm_context_recall": None,
+            "nonllm_context_recall": None,
+            "llm_metric": "ContextRecall",
+            "nonllm_metric": "NonLLMContextRecall",
+            "judge_model": args.judge_model,
+            "retrieved_contexts_used": len(retrieved),
+            "reference_contexts_used": len(reference_contexts),
         }
 
-        if args.mode == "token_recall":
-            row["retrieval_evaluation"].update(_evaluate_token_recall(reference, contexts))
+        notes = []
+        if not question:
+            notes.append("question is missing")
+        if not gold_answer:
+            notes.append("gold_answer is missing")
+        if not retrieved:
+            notes.append("retrieved_contexts is missing")
+        if not reference_contexts:
+            notes.append("gold_evidence is missing")
+        if notes:
+            row["retrieval_evaluation"]["note"] = "; ".join(notes)
             continue
 
-        if not contexts:
-            row["retrieval_evaluation"]["note"] = "Retrieved contexts are missing."
-            continue
-        if not reference:
-            row["retrieval_evaluation"]["note"] = "Reference text is missing."
-
-        ragas_row_indices.append(row_index)
-        ragas_samples.append(
+        row_indices.append(row_index)
+        samples.append(
             {
-                "user_input": str(row.get("question") or ""),
-                "response": str(row.get("answer") or ""),
-                "retrieved_contexts": contexts,
-                "reference": reference,
+                "question": question,
+                "gold_answer": gold_answer,
+                "retrieved_contexts": retrieved,
+                "reference_contexts": reference_contexts,
             }
         )
 
-    if args.mode == "ragas" and ragas_samples:
-        if not args.embedding_model:
-            raise ValueError(
-                "Missing --embedding-model or AZURE_OPENAI_EMBEDDING_DEPLOYMENT."
+    if samples:
+        scores = asyncio.run(
+            evaluate_samples(
+                samples,
+                judge_model=args.judge_model,
+                temperature=args.temperature,
             )
-        scores = _evaluate_ragas_retrieval(
-            ragas_samples,
-            chat_deployment=args.judge_model,
-            embedding_deployment=args.embedding_model,
-            temperature=args.temperature,
         )
-        for row_index, score in zip(ragas_row_indices, scores, strict=True):
+        for row_index, score in zip(row_indices, scores, strict=True):
             rows[row_index]["retrieval_evaluation"].update(score)
 
-    _save_rows(args.output, rows)
-    print(json.dumps(_summary(rows), indent=2, ensure_ascii=False, allow_nan=False))
+    save_rows(args.output, rows)
+    print(json.dumps(summary(rows), indent=2, ensure_ascii=False, allow_nan=False))
     print(f"Saved retrieval evaluation to {args.output}")
 
 
