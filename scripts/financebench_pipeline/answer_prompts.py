@@ -24,6 +24,18 @@ def normalize_text(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
+def extract_years(text: str) -> list[str]:
+    clean = normalize_text(text)
+    years = set(re.findall(r"\b(?:fy\s*)?((?:19|20)\d{2})\b", clean))
+    for short_year in re.findall(r"\bfy\s*['’]?(\d{2})\b", clean):
+        year_int = int(short_year)
+        if year_int <= 69:
+            years.add(f"20{year_int:02d}")
+        else:
+            years.add(f"19{year_int:02d}")
+    return sorted(years)
+
+
 def extract_months(text: str) -> list[str]:
     clean = normalize_text(text)
     month_hits = []
@@ -36,7 +48,7 @@ def extract_months(text: str) -> list[str]:
 def extract_question_constraints(question: str) -> dict[str, Any]:
     clean = normalize_text(question)
 
-    years = sorted(set(re.findall(r"\b(?:fy)?((?:19|20)\d{2})\b", clean)))
+    years = extract_years(question)
     quarter_match = re.findall(r"\bq([1-4])\b", clean)
     month_hits = extract_months(question)
     period_hints = [

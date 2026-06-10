@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any, Callable
 
+from financebench_pipeline.utils import _normalize_text
+
 
 ROUTER_PROMPT = """You are routing FinanceBench questions into exactly one QA pipeline.
 
@@ -137,3 +139,121 @@ def classify_question_style_llm(
         return fallback_style, fallback_conf, f"llm_parse_failed; fallback={fallback_reason}", raw
 
     return effective_style, 1.0, f"llm_router={label}; {reason or 'no_reason'}", raw
+
+
+# Statement-type detection: hint terms in the question → section_name patterns
+# in Neo4j.  Each entry has:
+#   - hints: substrings to look for in the question
+#   - includes: section_name substring patterns (CONTAINS, case-insensitive)
+#   - excludes: section_name substring patterns to filter OUT false positives
+_PRIMARY_STATEMENT_TYPES = (
+    {
+        "name": "balance_sheet",
+        "hints": (
+            "balance sheet",
+            "balance sheets",
+            "statement of financial position",
+            "statements of financial position",
+        ),
+        "includes": (
+            "balance sheet",
+            "balance sheets",
+            "statement of financial position",
+            "statements of financial position",
+            "financial position",
+        ),
+        "excludes": (
+            "off-balance sheet",
+            "off balance sheet",
+            "balance sheet classification",
+            "balance sheet arrangements",
+            "balance sheet hedge",
+        ),
+    },
+    {
+        "name": "income_statement",
+        "hints": (
+            "income statement",
+            "statement of income",
+            "statements of income",
+            "statement of operations",
+            "statements of operations",
+            "statement of earnings",
+            "statements of earnings",
+            "statement of comprehensive income",
+            "statements of comprehensive income",
+        ),
+        "includes": (
+            "income statement",
+            "income statements",
+            "statement of income",
+            "statements of income",
+            "statement of operations",
+            "statements of operations",
+            "statement of earnings",
+            "statements of earnings",
+            "comprehensive income",
+        ),
+        "excludes": (
+            "other income",
+            "income tax",
+            "interest income",
+            "comprehensive income reclassif",
+        ),
+    },
+    {
+        "name": "cash_flow",
+        "hints": (
+            "cash flow statement",
+            "cash flow statements",
+            "statement of cash flows",
+            "statements of cash flows",
+            "cash flows statement",
+        ),
+        "includes": (
+            "cash flow statement",
+            "cash flow statements",
+            "statement of cash flows",
+            "statements of cash flows",
+            "cash flows from",
+        ),
+        "excludes": (
+            "cash flow hedge",
+            "cash flow hedges",
+            "free cash flow",
+        ),
+    },
+    {
+        "name": "equity_statement",
+        "hints": (
+            "stockholders' equity",
+            "stockholders equity",
+            "shareholders' equity",
+            "shareholders equity",
+            "statement of equity",
+            "statements of equity",
+            "changes in equity",
+        ),
+        "includes": (
+            "stockholders' equity",
+            "stockholders equity",
+            "shareholders' equity",
+            "shareholders equity",
+            "statement of equity",
+            "statements of equity",
+            "changes in equity",
+        ),
+        "excludes": (
+            "equity method",
+            "equity investments",
+        ),
+    },
+)
+
+
+def _detect_statement_type(query_text: str) -> dict[str, Any] | None:
+    clean = _normalize_text(query_text)
+    for spec in _PRIMARY_STATEMENT_TYPES:
+        if any(hint in clean for hint in spec["hints"]):
+            return spec
+    return None
