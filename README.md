@@ -128,11 +128,10 @@ PYTHONPATH=src:scripts python -u scripts/evaluate_answer.py \
   --input output/graphrag_results.json \
   --output output/graphrag_results_answer_eval.json \
   --judge-model gpt-4.1-mini \
-  --embedding-model text-embedding-3-small \
   --overwrite
 ```
 
-This evaluator writes `answer_quality_evaluation` to each result row. The primary metrics are RAGAS `faithfulness`, which checks whether the answer is supported by retrieved context, and RAGAS `answer_accuracy`, which compares the generated answer against the reference answer.
+This evaluator writes `answer_evaluation` to each result row. The primary metrics are RAGAS `faithfulness`, which checks whether the answer is supported by retrieved context, RAGAS `answer_accuracy`, which compares the generated answer against the reference answer, and a deterministic answer accuracy check for numeric, rounded, unit-scaled, and yes/no answers.
 
 ## Archived Preprocessing and Graph Import
 

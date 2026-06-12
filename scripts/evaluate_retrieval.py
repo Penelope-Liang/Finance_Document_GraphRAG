@@ -101,6 +101,13 @@ async def score_llm_context_precision(scorer, question, gold_answer, retrieved):
     )
 
 
+async def score_context_relevance(scorer, question, retrieved):
+    return await scorer.ascore(
+        user_input=question,
+        retrieved_contexts=retrieved,
+    )
+
+
 async def score_nonllm_context_recall(scorer, retrieved, reference_contexts):
     from ragas.dataset_schema import SingleTurnSample
 
@@ -123,7 +130,11 @@ async def score_nonllm_context_precision(scorer, retrieved, reference_contexts):
 
 async def evaluate_samples(samples, judge_model, temperature):
     try:
-        from ragas.metrics.collections import ContextPrecision, ContextRecall
+        from ragas.metrics.collections import (
+            ContextPrecision,
+            ContextRecall,
+            ContextRelevance,
+        )
 
         # NonLLMContextRecall only lives in the legacy namespace; silence its
         # deprecation warning. It is non-LLM (string distance) and needs no LLM.
@@ -139,6 +150,7 @@ async def evaluate_samples(samples, judge_model, temperature):
     llm = build_ragas_v2_llm(judge_model, temperature=temperature)
     llm_recall_scorer = ContextRecall(llm=llm)
     llm_precision_scorer = ContextPrecision(llm=llm)
+    context_relevance_scorer = ContextRelevance(llm=llm)
     nonllm_recall_scorer = NonLLMContextRecall()
     nonllm_precision_scorer = NonLLMContextPrecisionWithReference()
 
@@ -154,6 +166,11 @@ async def evaluate_samples(samples, judge_model, temperature):
             llm_precision_scorer,
             question=sample["question"],
             gold_answer=sample["gold_answer"],
+            retrieved=sample["retrieved_contexts"],
+        )
+        context_relevance_score = await score_context_relevance(
+            context_relevance_scorer,
+            question=sample["question"],
             retrieved=sample["retrieved_contexts"],
         )
         nonllm_recall_score = None
@@ -173,6 +190,7 @@ async def evaluate_samples(samples, judge_model, temperature):
             {
                 "llm_context_recall": clean_score(llm_score),
                 "llm_context_precision": clean_score(llm_precision_score),
+                "context_relevance": clean_score(context_relevance_score),
                 "nonllm_context_recall": clean_score(nonllm_recall_score),
                 "nonllm_context_precision": clean_score(nonllm_precision_score),
             }
@@ -210,6 +228,7 @@ def summary(rows):
         "evaluated": len(evaluations),
         "mean_llm_context_recall": mean_metric(evaluations, "llm_context_recall"),
         "mean_llm_context_precision": mean_metric(evaluations, "llm_context_precision"),
+        "mean_context_relevance": mean_metric(evaluations, "context_relevance"),
         "mean_nonllm_context_recall": mean_metric(evaluations, "nonllm_context_recall"),
         "mean_nonllm_context_precision": mean_metric(evaluations, "nonllm_context_precision"),
     }
@@ -260,10 +279,12 @@ def main():
         row["retrieval_evaluation"] = {
             "llm_context_recall": None,
             "llm_context_precision": None,
+            "context_relevance": None,
             "nonllm_context_recall": None,
             "nonllm_context_precision": None,
             "llm_recall_metric": "ContextRecall",
             "llm_precision_metric": "ContextPrecision",
+            "context_relevance_metric": "ContextRelevance",
             "nonllm_recall_metric": "NonLLMContextRecall",
             "nonllm_precision_metric": "NonLLMContextPrecisionWithReference",
             "judge_model": args.judge_model,

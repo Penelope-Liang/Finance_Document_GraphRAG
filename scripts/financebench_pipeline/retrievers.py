@@ -13,11 +13,7 @@ from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResu
 
 from financebench_pipeline.filing_constraints import _extract_question_constraints
 from financebench_pipeline.formatting import _format_chunk_record, _format_table_record
-from financebench_pipeline.fusion import (
-    _attach_fusion_scores,  # noqa: F401  # kept for commented-out soft-fusion fallback
-    _evidence_bucket,
-    _item_base_score,
-)
+from financebench_pipeline.fusion import _evidence_bucket, _item_base_score
 from financebench_pipeline.query_rewriting import (
     _METRICS_TABLE_TARGETS,
     _metrics_component_targets,
@@ -480,7 +476,6 @@ class DualRetriever(Retriever):
         metrics_plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         search_text = retrieval_query_text or query_text
-        target_doc_id = (query_params or {}).get("doc_id") if query_params else None
         target_doc_ids = list((query_params or {}).get("doc_ids") or []) if query_params else []
         table_search_text = (
             f"{search_text}\nTarget filing doc_ids: {', '.join(target_doc_ids)}"
@@ -557,15 +552,7 @@ class DualRetriever(Retriever):
             seen_contents.add(content)
             items.append(item)
 
-        # --- OLD soft-fusion ranking (tunable magic-number weights); kept for ablation ---
-        # fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
-        # items = _attach_fusion_scores(fusion_question, items)
-        # items.sort(
-        #     key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
-        #     reverse=True,
-        # )
-
-        # --- NEW deterministic constraint-bucket ranking ---
+        # Deterministic constraint-bucket ranking.
         # Hard financial constraints (doc / metric / period / numeric cell) decide
         # the bucket (tier); a simple per-source base score breaks ties within a
         # bucket. No tunable fusion weights, no reranker. Items are demoted, never

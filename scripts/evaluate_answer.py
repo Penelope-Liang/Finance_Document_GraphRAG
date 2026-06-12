@@ -1,18 +1,33 @@
 import argparse
+import asyncio
 import json
 import math
 import os
-import warnings
+import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
-from ragas_components import build_ragas_azure_components
+from ragas_components import build_ragas_v2_llm
 
 
-def _load_rows(path):
+NUMBER_PATTERN = re.compile(
+    r"(?P<prefix>[$€£])?\s*"
+    r"(?P<negative_paren>\()?"
+    r"(?P<number>[-+]?\d[\d,]*(?:\.\d+)?)"
+    r"(?P<negative_paren_close>\))?"
+    r"\s*(?P<unit>%|percent|percentage points?|bps|basis points?|millions?|"
+    r"billions?|thousands?|bn|mm|m|b)?",
+    re.IGNORECASE,
+)
+
+YES_NO_PATTERN = re.compile(r"\b(yes|no)\b", re.IGNORECASE)
+
+
+def load_rows(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _save_rows(path, rows):
+def save_rows(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(rows, indent=2, ensure_ascii=False, allow_nan=False),
@@ -20,7 +35,275 @@ def _save_rows(path, rows):
     )
 
 
-def _selected_rows(rows, question_ids, limit):
+def context_text(context):
+    if isinstance(context, str):
+        return context.strip()
+    if isinstance(context, dict):
+        return str(context.get("text") or "").strip()
+    return str(context or "").strip()
+
+
+def get_retrieved_contexts(row, max_contexts, max_context_chars):
+    contexts = row.get("retrieved_contexts") or []
+    if not isinstance(contexts, list):
+        return []
+
+    output = []
+    for context in contexts[:max_contexts]:
+        text = context_text(context)
+        if not text:
+            continue
+        if max_context_chars > 0:
+            text = text[:max_context_chars]
+        output.append(text)
+    return output
+
+
+def clean_score(value):
+    if value is None:
+        return None
+    result = getattr(value, "value", value)
+    if isinstance(result, float) and math.isnan(result):
+        return None
+    try:
+        number = float(result)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number):
+        return None
+    return number
+
+
+def infer_rounding_decimals(question, gold_answer):
+    text = str(question or "").lower()
+    match = re.search(r"round(?:ed)?\s+to\s+(?:the\s+)?(\w+|\d+)\s+decimal", text)
+    if match:
+        word = match.group(1)
+        words = {
+            "zero": 0,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+        }
+        if word.isdigit():
+            return int(word)
+        if word in words:
+            return words[word]
+
+    gold_match = NUMBER_PATTERN.search(str(gold_answer or ""))
+    if gold_match:
+        raw_number = gold_match.group("number").strip("()")
+        if "." in raw_number:
+            fractional = raw_number.split(".", 1)[1]
+            return len(fractional.rstrip("0"))
+    return 0
+
+
+def question_scale(question):
+    text = str(question or "").lower()
+    if re.search(r"\b(?:usd|dollars?)\s+billions?\b|\bbillions?\s+of\s+dollars?\b", text):
+        return 1_000_000_000.0
+    if re.search(r"\b(?:usd|dollars?)\s+millions?\b|\bmillions?\s+of\s+dollars?\b", text):
+        return 1_000_000.0
+    if re.search(r"\b(?:usd|dollars?)\s+thousands?\b|\bthousands?\s+of\s+dollars?\b", text):
+        return 1_000.0
+    return 1.0
+
+
+def is_percent_question(question):
+    text = str(question or "").lower()
+    return bool(re.search(r"\bpercent(?:age)?s?\b|%", text))
+
+
+def unit_scale(unit):
+    normalized = (unit or "").lower()
+    if normalized in {"billion", "billions", "bn", "b"}:
+        return 1_000_000_000.0
+    if normalized in {"million", "millions", "mm", "m"}:
+        return 1_000_000.0
+    if normalized in {"thousand", "thousands"}:
+        return 1_000.0
+    return None
+
+
+def parse_numeric_candidates(text, question):
+    """Return comparable numeric candidates from an answer string.
+
+    Explicit million/billion units override the question unit. Otherwise, values
+    inherit units requested in the question. Percent questions are compared in
+    percentage-point space, while also accepting decimal-ratio equivalents.
+    """
+    candidates = []
+    q_scale = question_scale(question)
+    q_is_percent = is_percent_question(question)
+    for match in NUMBER_PATTERN.finditer(str(text or "")):
+        raw_number = match.group("number")
+        try:
+            value = float(raw_number.replace(",", ""))
+        except ValueError:
+            continue
+        if match.group("negative_paren") and match.group("negative_paren_close"):
+            value = -abs(value)
+
+        unit = match.group("unit") or ""
+        unit_lower = unit.lower()
+        if unit_lower in {"bps", "basis point", "basis points"}:
+            candidates.append(
+                {
+                    "value": value / 100.0,
+                    "raw": match.group(0).strip(),
+                    "scale": 1.0,
+                }
+            )
+            continue
+
+        scale = unit_scale(unit)
+        if scale is not None:
+            normalized = value * scale
+        else:
+            scale = q_scale
+            normalized = value * scale
+
+        variants = [normalized]
+        variant_scale = scale
+        if q_is_percent or unit_lower in {"%", "percent", "percentage point", "percentage points"}:
+            variants = [value]
+            variant_scale = 1.0
+            if abs(value) <= 1:
+                variants.append(value * 100.0)
+
+        for candidate in variants:
+            candidates.append(
+                {
+                    "value": candidate,
+                    "raw": match.group(0).strip(),
+                    "scale": variant_scale,
+                }
+            )
+    return candidates
+
+
+def extract_yes_no(text):
+    match = YES_NO_PATTERN.search(str(text or ""))
+    return match.group(1).lower() if match else None
+
+
+def normalize_text(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def round_for_answer_comparison(value, decimals, scale):
+    """Round a normalized value at the answer's requested precision."""
+    try:
+        decimal_value = Decimal(str(value))
+        quantum = Decimal(str(scale)).normalize() * (Decimal("1").scaleb(-decimals))
+        return decimal_value.quantize(quantum, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def deterministic_answer_evaluation(question, answer, gold_answer):
+    gold_yes_no = extract_yes_no(gold_answer)
+    answer_yes_no = extract_yes_no(answer)
+    if gold_yes_no:
+        return {
+            "deterministic_answer_accuracy": 1.0 if answer_yes_no == gold_yes_no else 0.0,
+            "deterministic_answer_match": answer_yes_no == gold_yes_no,
+            "deterministic_answer_type": "yes_no",
+            "deterministic_answer_reason": (
+                f"answer={answer_yes_no}; gold={gold_yes_no}"
+                if answer_yes_no
+                else "could not extract yes/no from answer"
+            ),
+        }
+
+    answer_numbers = parse_numeric_candidates(answer, question)
+    gold_numbers = parse_numeric_candidates(gold_answer, question)
+    if answer_numbers and gold_numbers:
+        decimals = infer_rounding_decimals(question, gold_answer)
+        abs_tolerance = 0.5 * (10 ** -decimals)
+        best = None
+        for answer_number in answer_numbers:
+            for gold_number in gold_numbers:
+                diff = abs(answer_number["value"] - gold_number["value"])
+                scale = max(
+                    answer_number.get("scale", 1.0),
+                    gold_number.get("scale", 1.0),
+                )
+                tolerance = abs_tolerance * scale
+                rounded_answer = round_for_answer_comparison(
+                    answer_number["value"],
+                    decimals,
+                    scale,
+                )
+                rounded_gold = round_for_answer_comparison(
+                    gold_number["value"],
+                    decimals,
+                    scale,
+                )
+                item = (
+                    diff,
+                    rounded_answer,
+                    rounded_gold,
+                    tolerance,
+                    answer_number,
+                    gold_number,
+                )
+                if best is None or diff < best[0]:
+                    best = item
+        diff, rounded_answer, rounded_gold, tolerance, answer_number, gold_number = best
+        matched = (
+            rounded_answer is not None
+            and rounded_gold is not None
+            and rounded_answer == rounded_gold
+        )
+        return {
+            "deterministic_answer_accuracy": 1.0 if matched else 0.0,
+            "deterministic_answer_match": matched,
+            "deterministic_answer_type": "numeric",
+            "deterministic_answer_reason": (
+                f"answer={answer_number['raw']} ({answer_number['value']}); "
+                f"gold={gold_number['raw']} ({gold_number['value']}); "
+                f"rounded_answer={rounded_answer}; rounded_gold={rounded_gold}; "
+                f"diff={diff}; tolerance_equivalent={tolerance}; "
+                f"rounding_decimals={decimals}"
+            ),
+            "deterministic_answer_value": answer_number["value"],
+            "deterministic_gold_value": gold_number["value"],
+            "deterministic_rounded_answer_value": (
+                float(rounded_answer) if rounded_answer is not None else None
+            ),
+            "deterministic_rounded_gold_value": (
+                float(rounded_gold) if rounded_gold is not None else None
+            ),
+            "deterministic_tolerance": tolerance,
+        }
+
+    normalized_answer = normalize_text(answer)
+    normalized_gold = normalize_text(gold_answer)
+    if normalized_answer and normalized_gold:
+        matched = (
+            normalized_answer == normalized_gold
+            or (len(normalized_gold) >= 4 and normalized_gold in normalized_answer)
+        )
+        return {
+            "deterministic_answer_accuracy": 1.0 if matched else 0.0,
+            "deterministic_answer_match": matched,
+            "deterministic_answer_type": "text",
+            "deterministic_answer_reason": "normalized exact/contains match",
+        }
+
+    return {
+        "deterministic_answer_accuracy": None,
+        "deterministic_answer_match": None,
+        "deterministic_answer_type": None,
+        "deterministic_answer_reason": "could not extract comparable answer",
+    }
+
+
+def selected_rows(rows, question_ids, limit):
     selected = [
         (idx, row)
         for idx, row in enumerate(rows)
@@ -31,137 +314,70 @@ def _selected_rows(rows, question_ids, limit):
     return selected
 
 
-def _context_text(context):
-    if isinstance(context, str):
-        return context
-    if isinstance(context, dict):
-        for key in ("text", "content", "page_content"):
-            value = context.get(key)
-            if value:
-                return str(value)
-    return str(context or "")
-
-
-def _context_texts(row, context_field, max_contexts, max_context_chars):
-    contexts = row.get(context_field)
-    if contexts is None and context_field != "final_context":
-        contexts = row.get("final_context")
-    if contexts is None and context_field != "retrieved_contexts":
-        contexts = row.get("retrieved_contexts")
-    if not isinstance(contexts, list):
-        return []
-
-    output = []
-    for context in contexts[:max_contexts]:
-        text = _context_text(context).strip()
-        if not text:
-            continue
-        if max_context_chars > 0:
-            text = text[:max_context_chars]
-        output.append(text)
-    return output
-
-
-def _nan_to_none(value):
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
+async def evaluate_samples(samples, judge_model, temperature):
     try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if math.isnan(number):
-        return None
-    return number
-
-
-def _init_metric(metric):
-    if hasattr(metric, "required_columns"):
-        return metric
-    if isinstance(metric, type):
-        return metric()
-    if callable(metric):
-        candidate = metric()
-        if hasattr(candidate, "required_columns"):
-            return candidate
-    return metric
-
-
-def _evaluate_ragas_answer_quality(samples, chat_deployment, embedding_deployment, temperature):
-    if not samples:
-        return []
-
-    try:
-        from datasets import Dataset
-        from ragas import evaluate
-
-        # The legacy ragas.metrics objects are intentionally used because the
-        # ragas.metrics.collections (v2) metrics are not compatible with the
-        # legacy evaluate() API in this ragas version.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            from ragas.metrics import AnswerAccuracy, faithfulness
+        from ragas.metrics.collections import AnswerAccuracy, Faithfulness
     except ImportError as exc:
-        raise ImportError("Answer quality evaluation requires: pip install -e '.[evaluation]'") from exc
+        raise ImportError("Answer evaluation requires ragas.") from exc
 
-    llm, embeddings = build_ragas_azure_components(
-        chat_deployment=chat_deployment,
-        embedding_deployment=embedding_deployment,
-        temperature=temperature,
-    )
-    result = evaluate(
-        Dataset.from_list(samples),
-        metrics=[_init_metric(faithfulness), AnswerAccuracy()],
-        llm=llm,
-        embeddings=embeddings,
-    )
-    frame = result.to_pandas()
-    output = []
-    for _, row in frame.iterrows():
-        output.append(
+    llm = build_ragas_v2_llm(judge_model, temperature=temperature)
+    accuracy_scorer = AnswerAccuracy(llm=llm)
+    faithfulness_scorer = Faithfulness(llm=llm)
+
+    results = []
+    for sample in samples:
+        accuracy_score = await accuracy_scorer.ascore(
+            user_input=sample["question"],
+            response=sample["answer"],
+            reference=sample["gold_answer"],
+        )
+        faithfulness_score = await faithfulness_scorer.ascore(
+            user_input=sample["question"],
+            response=sample["answer"],
+            retrieved_contexts=sample["retrieved_contexts"],
+        )
+        results.append(
             {
-                "faithfulness_score": _nan_to_none(row.get("faithfulness")),
-                "answer_accuracy": _nan_to_none(
-                    row.get("nv_accuracy", row.get("answer_accuracy"))
-                ),
+                "answer_accuracy": clean_score(accuracy_score),
+                "faithfulness": clean_score(faithfulness_score),
             }
         )
-    return output
+    return results
 
 
-def _summary(rows):
-    evaluations = [
-        row.get("answer_quality_evaluation") or {}
-        for row in rows
-        if row.get("answer_quality_evaluation") is not None
+def mean_metric(evaluations, key):
+    values = [
+        item.get(key)
+        for item in evaluations
+        if item.get(key) is not None
     ]
-    summary = {"evaluated": len(evaluations)}
-    for metric in ("faithfulness_score", "answer_accuracy"):
-        values = [
-            item.get(metric)
-            for item in evaluations
-            if item.get(metric) is not None
-        ]
-        summary[f"mean_{metric}"] = sum(values) / len(values) if values else None
-    summary["missing_answers"] = sum(1 for row in rows if not row.get("answer"))
-    return summary
+    return sum(values) / len(values) if values else None
+
+
+def summary(rows):
+    evaluations = [
+        row.get("answer_evaluation") or {}
+        for row in rows
+        if row.get("answer_evaluation") is not None
+    ]
+    return {
+        "evaluated": len(evaluations),
+        "mean_answer_accuracy": mean_metric(evaluations, "answer_accuracy"),
+        "mean_deterministic_answer_accuracy": mean_metric(
+            evaluations,
+            "deterministic_answer_accuracy",
+        ),
+        "mean_faithfulness": mean_metric(evaluations, "faithfulness"),
+        "missing_answers": sum(1 for row in rows if not row.get("answer")),
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description=(
-            "Evaluate generated answer quality with RAGAS faithfulness "
-            "and RAGAS answer accuracy."
-        )
+        description="Evaluate answer accuracy and faithfulness with RAGAS metrics."
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument(
-        "--context-field",
-        default="retrieved_contexts",
-        help="Field containing retrieved contexts. Falls back to final_context.",
-    )
     parser.add_argument("--max-contexts", type=int, default=10)
     parser.add_argument("--max-context-chars", type=int, default=2000)
     parser.add_argument(
@@ -169,85 +385,89 @@ def main():
         default=os.environ.get("AZURE_OPENAI_DEPLOYMENT")
         or os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT")
         or "gpt-4.1-mini",
-        help="Azure OpenAI chat deployment used by RAGAS metrics.",
-    )
-    parser.add_argument(
-        "--embedding-model",
-        default=os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""),
-        help="Azure OpenAI embedding deployment used by RAGAS metrics when required.",
     )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument(
-        "--question-id",
-        action="append",
-        default=[],
-        help="Question ID to evaluate. Can be passed multiple times. Defaults to all rows.",
-    )
+    parser.add_argument("--question-id", action="append", default=[])
     args = parser.parse_args()
 
-    rows = _load_rows(args.input)
-    selected = _selected_rows(rows, set(args.question_id), args.limit)
+    rows = load_rows(args.input)
+    samples = []
+    row_indices = []
 
-    ragas_samples = []
-    ragas_row_indices = []
-
-    for row_index, row in selected:
-        if row.get("answer_quality_evaluation") and not args.overwrite:
+    for row_index, row in selected_rows(rows, set(args.question_id), args.limit):
+        if row.get("answer_evaluation") and not args.overwrite:
             continue
 
-        contexts = _context_texts(
+        question = str(row.get("question") or "").strip()
+        answer = str(row.get("answer") or "").strip()
+        gold_answer = str(row.get("gold_answer") or "").strip()
+        contexts = get_retrieved_contexts(
             row,
-            context_field=args.context_field,
             max_contexts=args.max_contexts,
             max_context_chars=args.max_context_chars,
         )
-        answer = row.get("answer")
-        row["answer_quality_evaluation"] = {
-            "faithfulness_score": None,
+        row["answer_evaluation"] = {
             "answer_accuracy": None,
-            "metric_backend": "ragas",
+            "faithfulness": None,
+            "deterministic_answer_accuracy": None,
+            "answer_accuracy_metric": "AnswerAccuracy",
+            "faithfulness_metric": "Faithfulness",
+            "deterministic_answer_metric": "numeric_or_yes_no_or_text_match",
             "judge_model": args.judge_model,
-            "embedding_model": args.embedding_model,
-            "context_field": args.context_field,
-            "contexts_used": len(contexts),
+            "retrieved_contexts_used": len(contexts),
         }
 
+        notes = []
+        if not question:
+            notes.append("question is missing")
         if not answer:
-            row["answer_quality_evaluation"]["note"] = "Candidate answer is missing."
-            continue
-        if not contexts:
-            row["answer_quality_evaluation"]["note"] = "Retrieved contexts are missing."
+            notes.append("answer is missing")
+        if not gold_answer:
+            notes.append("gold_answer is missing")
+        if notes:
+            if not contexts:
+                notes.append("retrieved_contexts is missing")
+            row["answer_evaluation"]["note"] = "; ".join(notes)
             continue
 
-        ragas_row_indices.append(row_index)
-        ragas_samples.append(
+        row["answer_evaluation"].update(
+            deterministic_answer_evaluation(
+                question=question,
+                answer=answer,
+                gold_answer=gold_answer,
+            )
+        )
+
+        if not contexts:
+            row["answer_evaluation"]["note"] = "retrieved_contexts is missing; RAGAS metrics skipped"
+            continue
+
+        row_indices.append(row_index)
+        samples.append(
             {
-                "user_input": str(row.get("question") or ""),
-                "response": str(answer),
+                "question": question,
+                "answer": answer,
+                "gold_answer": gold_answer,
                 "retrieved_contexts": contexts,
-                "reference": str(row.get("gold_answer") or ""),
             }
         )
 
-    if ragas_samples:
-        if not args.embedding_model:
-            raise ValueError(
-                "Missing --embedding-model or AZURE_OPENAI_EMBEDDING_DEPLOYMENT."
+    if samples:
+        scores = asyncio.run(
+            evaluate_samples(
+                samples,
+                judge_model=args.judge_model,
+                temperature=args.temperature,
             )
-        scores = _evaluate_ragas_answer_quality(
-            ragas_samples,
-            chat_deployment=args.judge_model,
-            embedding_deployment=args.embedding_model,
-            temperature=args.temperature,
         )
-        for row_index, score in zip(ragas_row_indices, scores, strict=True):
-            rows[row_index]["answer_quality_evaluation"].update(score)
+        for row_index, score in zip(row_indices, scores, strict=True):
+            rows[row_index]["answer_evaluation"].update(score)
 
-    _save_rows(args.output, rows)
-    print(json.dumps(_summary(rows), indent=2, ensure_ascii=False, allow_nan=False))
-    print(f"Saved answer quality evaluation to {args.output}")
+    save_rows(args.output, rows)
+    print(json.dumps(summary(rows), indent=2, ensure_ascii=False, allow_nan=False))
+    print(f"Saved answer evaluation to {args.output}")
 
 
 if __name__ == "__main__":
