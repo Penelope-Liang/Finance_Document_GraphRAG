@@ -4,6 +4,7 @@ from __future__ import annotations
 CHUNK_RETRIEVAL_QUERY = """
     WITH node AS chunk, score
     WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
+      AND ($doc_ids = [] OR chunk.doc_id IN $doc_ids)
       AND ($company_doc_key IS NULL OR toLower(chunk.doc_id) STARTS WITH $company_doc_key)
     OPTIONAL MATCH (chunk)-[:HAS_TABLE]->(:Table)-[:HAS_CELL]->(cell:TableCell)
     OPTIONAL MATCH (chunk)<-[:FROM_CHUNK]-(entity)
@@ -36,6 +37,7 @@ CALL (target) {
          toLower(coalesce(cell.col_header, "")) AS col_text,
          toLower(coalesce(t.section_name, ch.section_name, "")) AS section_text
     WHERE ($doc_id IS NULL OR ch.doc_id = $doc_id)
+      AND ($doc_ids = [] OR ch.doc_id IN $doc_ids)
       AND ($company_doc_key IS NULL OR toLower(ch.doc_id) STARTS WITH $company_doc_key)
       AND any(alias IN target.aliases WHERE row_text CONTAINS alias)
       AND ($years = [] OR any(year IN $years WHERE col_text CONTAINS year))
@@ -80,6 +82,7 @@ LIMIT $limit
 PRIMARY_STATEMENT_QUERY = """
 MATCH (chunk:Chunk)
 WHERE ($doc_id IS NULL OR chunk.doc_id = $doc_id)
+  AND ($doc_ids = [] OR chunk.doc_id IN $doc_ids)
   AND ($company_doc_key IS NULL OR toLower(chunk.doc_id) STARTS WITH $company_doc_key)
   AND chunk.should_index = true
   AND (

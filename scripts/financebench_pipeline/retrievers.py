@@ -13,7 +13,11 @@ from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResu
 
 from financebench_pipeline.filing_constraints import _extract_question_constraints
 from financebench_pipeline.formatting import _format_chunk_record, _format_table_record
-from financebench_pipeline.fusion import _attach_fusion_scores
+from financebench_pipeline.fusion import (
+    _attach_fusion_scores,  # noqa: F401  # kept for commented-out soft-fusion fallback
+    _evidence_bucket,
+    _item_base_score,
+)
 from financebench_pipeline.query_rewriting import (
     _METRICS_TABLE_TARGETS,
     _metrics_component_targets,
@@ -52,6 +56,7 @@ class MetricsTableCellRetriever(Retriever):
         self,
         query_text: str,
         doc_id: str | None = None,
+        doc_ids: list[str] | None = None,
         company_doc_key: str | None = None,
         years: list[str] | None = None,
         plan: dict[str, Any] | None = None,
@@ -65,6 +70,7 @@ class MetricsTableCellRetriever(Retriever):
                     "matched": False,
                     "reason": "missing targets",
                     "doc_id": doc_id,
+                    "doc_ids": list(doc_ids or []),
                     "company_doc_key": company_doc_key,
                     "target_names": target_names,
                 },
@@ -81,6 +87,7 @@ class MetricsTableCellRetriever(Retriever):
         ]
         params = {
             "doc_id": doc_id,
+            "doc_ids": list(doc_ids or []),
             "company_doc_key": company_doc_key,
             "years": list(years or []),
             "targets": targets,
@@ -113,6 +120,8 @@ class MetricsTableCellRetriever(Retriever):
                 "matched": bool(items),
                 "doc_id": doc_id,
                 "doc_id_filter_applied": bool(doc_id),
+                "doc_ids": list(doc_ids or []),
+                "doc_ids_filter_applied": bool(doc_ids),
                 "company_doc_key": company_doc_key,
                 "company_filter_applied": bool(company_doc_key),
                 "years": list(years or []),
@@ -351,6 +360,7 @@ class PrimaryStatementRetriever(Retriever):
     ) -> RetrieverResult:
         spec = _detect_statement_type(query_text)
         doc_id = (query_params or {}).get("doc_id") if query_params else None
+        doc_ids = list((query_params or {}).get("doc_ids") or []) if query_params else []
         company_doc_key = (query_params or {}).get("company_doc_key") if query_params else None
 
         if spec is None:
@@ -365,6 +375,7 @@ class PrimaryStatementRetriever(Retriever):
 
         params = {
             "doc_id": doc_id,
+            "doc_ids": doc_ids,
             "company_doc_key": company_doc_key,
             "statement_type": spec["name"],
             "includes": list(spec["includes"]),
@@ -396,6 +407,8 @@ class PrimaryStatementRetriever(Retriever):
                 "statement_type": spec["name"],
                 "doc_id": doc_id,
                 "doc_id_filter_applied": bool(doc_id),
+                "doc_ids": doc_ids,
+                "doc_ids_filter_applied": bool(doc_ids),
                 "company_doc_key": company_doc_key,
                 "company_filter_applied": bool(company_doc_key),
                 "kept": len(items),
@@ -436,19 +449,20 @@ class DualRetriever(Retriever):
         )
 
     @staticmethod
-    def _filter_result_doc_id(result: RetrieverResult, doc_id: str | None) -> RetrieverResult:
-        if not doc_id:
+    def _filter_result_doc_ids(result: RetrieverResult, doc_ids: list[str]) -> RetrieverResult:
+        if not doc_ids:
             return result
+        allowed = set(doc_ids)
         kept = []
         dropped = 0
         for item in result.items:
             item_doc_id = (item.metadata or {}).get("doc_id")
-            if item_doc_id and item_doc_id != doc_id:
+            if item_doc_id and item_doc_id not in allowed:
                 dropped += 1
                 continue
             kept.append(item)
         metadata = dict(result.metadata or {})
-        metadata["post_doc_id_filter"] = doc_id
+        metadata["post_doc_ids_filter"] = list(doc_ids)
         metadata["post_doc_id_filter_dropped"] = dropped
         return RetrieverResult(items=kept, metadata=metadata)
 
@@ -461,14 +475,16 @@ class DualRetriever(Retriever):
         t2c_style: str = "direct",
         retrieval_query_text: str | None = None,
         metrics_doc_id: str | None = None,
+        metrics_doc_ids: list[str] | None = None,
         metrics_company_doc_key: str | None = None,
         metrics_plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         search_text = retrieval_query_text or query_text
         target_doc_id = (query_params or {}).get("doc_id") if query_params else None
+        target_doc_ids = list((query_params or {}).get("doc_ids") or []) if query_params else []
         table_search_text = (
-            f"{search_text}\nTarget filing doc_id: {target_doc_id}"
-            if target_doc_id
+            f"{search_text}\nTarget filing doc_ids: {', '.join(target_doc_ids)}"
+            if target_doc_ids
             else search_text
         )
         try:
@@ -476,6 +492,7 @@ class DualRetriever(Retriever):
                 self.metrics_retriever.search(
                     query_text=query_text,
                     doc_id=metrics_doc_id,
+                    doc_ids=list(metrics_doc_ids or []),
                     company_doc_key=metrics_company_doc_key,
                     years=list((metrics_plan or {}).get("years") or []),
                     plan=metrics_plan,
@@ -513,7 +530,7 @@ class DualRetriever(Retriever):
         except Exception as exc:
             table_result = self._failed_result("Text2CypherRetriever", exc)
         table_result = _sanitize_retriever_result(table_result)
-        table_result = self._filter_result_doc_id(table_result, target_doc_id)
+        table_result = self._filter_result_doc_ids(table_result, target_doc_ids)
 
         try:
             primary_result = (
@@ -540,12 +557,50 @@ class DualRetriever(Retriever):
             seen_contents.add(content)
             items.append(item)
 
-        fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
-        items = _attach_fusion_scores(fusion_question, items)
-        items.sort(
-            key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
-            reverse=True,
-        )
+        # --- OLD soft-fusion ranking (tunable magic-number weights); kept for ablation ---
+        # fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
+        # items = _attach_fusion_scores(fusion_question, items)
+        # items.sort(
+        #     key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
+        #     reverse=True,
+        # )
+
+        # --- NEW deterministic constraint-bucket ranking ---
+        # Hard financial constraints (doc / metric / period / numeric cell) decide
+        # the bucket (tier); a simple per-source base score breaks ties within a
+        # bucket. No tunable fusion weights, no reranker. Items are demoted, never
+        # dropped, so recall is preserved.
+        requested_years = list((metrics_plan or {}).get("years") or [])
+        if not requested_years:
+            requested_years = list(_extract_question_constraints(search_text)["years"])
+
+        ranked: list[tuple[int, int, float, RetrieverResultItem]] = []
+        for item in items:
+            priority, bucket, features = _evidence_bucket(
+                item,
+                target_doc_ids,
+                requested_years=requested_years,
+            )
+            base_score = _safe_float(_item_base_score(item))
+            source_priority = int(features.get("source_priority") or 0)
+            metadata = dict(item.metadata or {})
+            metadata["bucket"] = bucket
+            metadata["bucket_priority"] = priority
+            metadata["bucket_features"] = features
+            metadata["source_priority"] = source_priority
+            metadata["base_score"] = base_score
+            ranked.append(
+                (
+                    priority,
+                    source_priority,
+                    base_score,
+                    _sanitize_retriever_item(
+                        RetrieverResultItem(content=item.content, metadata=metadata)
+                    ),
+                )
+            )
+        ranked.sort(key=lambda entry: (entry[0], entry[1], entry[2]), reverse=True)
+        items = [item for _, _, _, item in ranked]
 
         return _sanitize_retriever_result(RetrieverResult(
             items=items,
@@ -556,11 +611,17 @@ class DualRetriever(Retriever):
                 "table_retriever": table_result.metadata,
                 "primary_retriever": primary_result.metadata,
                 "retrieval_query_text": search_text,
-                "fusion": {
-                    "strategy": "source_softmax_plus_constraint_bonus",
-                    "chunk_weight": 0.5,
-                    "table_weight": 0.5,
-                    "bonus_weight": 0.15,
+                "ranking": {
+                    "strategy": "constraint_bucket_then_base_score",
+                    "bucket_priority": {
+                        "exact_cell": 5,
+                        "metric_cell": 4,
+                        "statement": 3,
+                        "document": 2,
+                        "weak_or_mismatch": 1,
+                    },
+                    "tie_break": "source_priority_then_per_source_base_score",
+                    "requested_years": requested_years,
                 },
             },
         ))

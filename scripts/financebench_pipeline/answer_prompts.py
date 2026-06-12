@@ -5,18 +5,18 @@ from typing import Any
 
 
 _MONTH_ALIASES = {
-    "january": ("january", "jan", "jan."),
-    "february": ("february", "feb", "feb."),
-    "march": ("march", "mar", "mar."),
-    "april": ("april", "apr", "apr."),
+    "january": ("january", "jan"),
+    "february": ("february", "feb"),
+    "march": ("march", "mar"),
+    "april": ("april", "apr"),
     "may": ("may",),
-    "june": ("june", "jun", "jun."),
-    "july": ("july", "jul", "jul."),
-    "august": ("august", "aug", "aug."),
-    "september": ("september", "sept", "sept.", "sep", "sep."),
-    "october": ("october", "oct", "oct."),
-    "november": ("november", "nov", "nov."),
-    "december": ("december", "dec", "dec."),
+    "june": ("june", "jun"),
+    "july": ("july", "jul"),
+    "august": ("august", "aug"),
+    "september": ("september", "sept", "sep"),
+    "october": ("october", "oct"),
+    "november": ("november", "nov"),
+    "december": ("december", "dec"),
 }
 
 
@@ -37,6 +37,7 @@ def extract_years(text: str) -> list[str]:
 
 
 def extract_months(text: str) -> list[str]:
+    """Extract month-level temporal cues only; calendar days are ignored."""
     clean = normalize_text(text)
     month_hits = []
     for month, aliases in _MONTH_ALIASES.items():
@@ -117,7 +118,7 @@ def _append_constraint_lines(lines: list[str], constraints: dict[str, Any]) -> s
     if constraints["quarters"]:
         lines.append(f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
     if constraints["months"]:
-        lines.append(f"- Extracted months/dates context: {', '.join(constraints['months'])}")
+        lines.append(f"- Extracted month-level temporal cues: {', '.join(constraints['months'])}")
     if constraints["period_hints"]:
         lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
     return "\n".join(lines)

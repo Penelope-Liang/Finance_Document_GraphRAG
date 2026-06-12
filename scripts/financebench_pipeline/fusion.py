@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 from neo4j_graphrag.types import RetrieverResultItem
 
@@ -88,6 +89,121 @@ def _item_base_score(item: RetrieverResultItem) -> float:
         # to the question's statement-type hint, so give them a uniform high base.
         return 1.0
     return 0.0
+
+
+_BUCKET_PRIORITY = {
+    "exact_cell": 5,
+    "metric_cell": 4,
+    "statement": 3,
+    "document": 2,
+    "weak_or_mismatch": 1,
+}
+
+
+def _has_numeric_value(item: RetrieverResultItem) -> bool:
+    metadata = item.metadata or {}
+    if metadata.get("numeric_value") is not None:
+        return True
+    content = str(item.content or "")
+    return "numeric_value=" in content and "numeric_value=None" not in content
+
+
+def _year_status(item: RetrieverResultItem, requested_years: list[str] | None = None) -> str:
+    """Return matched/unknown/conflict.
+
+    Unknown is neutral: if no requested year or no explicit candidate year is
+    available, the item is not demoted. Conflict is used only when the candidate
+    exposes explicit years and none match the requested years.
+    """
+    requested = {str(year) for year in (requested_years or []) if str(year).strip()}
+    if not requested:
+        return "unknown"
+
+    metadata = item.metadata or {}
+    if int(metadata.get("year_hit") or 0) > 0:
+        return "matched"
+
+    col_header = _normalize_text(str(metadata.get("col_header") or ""))
+    content = _normalize_text(str(item.content or ""))
+    haystack = " ".join(part for part in (col_header, content) if part)
+    if any(year in haystack for year in requested):
+        return "matched"
+
+    candidate_years = set(re.findall(r"\b(?:19|20)\d{2}\b", haystack))
+    if candidate_years:
+        return "conflict"
+    return "unknown"
+
+
+def _source_priority(item: RetrieverResultItem) -> int:
+    source = (item.metadata or {}).get("source")
+    return {
+        "metrics_table": 4,
+        "table": 3,
+        "primary_statement": 2,
+        "chunk": 1,
+    }.get(str(source), 0)
+
+
+def _evidence_bucket(
+    item: RetrieverResultItem,
+    target_doc_ids: list[str] | None = None,
+    requested_years: list[str] | None = None,
+) -> tuple[int, str, dict[str, object]]:
+    """Assign a deterministic constraint bucket from metadata only.
+
+    Hard financial constraints (document / metric / period / numeric cell)
+    decide the bucket and therefore the rank tier. A per-source base score is
+    only used by the caller as a within-bucket tie-break. There are no tunable
+    fusion weights here. Items are demoted, never dropped, so recall is kept.
+    """
+    metadata = item.metadata or {}
+    source = metadata.get("source")
+    doc_id = metadata.get("doc_id")
+
+    allowed = set(target_doc_ids or [])
+    # With no doc constraint (or an item without a doc_id) we cannot prove a
+    # mismatch, so we do not penalise it.
+    doc_mismatch = bool(allowed) and bool(doc_id) and doc_id not in allowed
+    doc_match = bool(allowed) and bool(doc_id) and doc_id in allowed
+    doc_unknown = not allowed or not doc_id
+
+    content = _normalize_text(str(item.content or ""))
+    row_header = _normalize_text(str(metadata.get("row_header") or ""))
+    col_header = _normalize_text(str(metadata.get("col_header") or ""))
+    numeric_present = _has_numeric_value(item)
+    row_hit = int(metadata.get("row_hit") or 0)
+    section_hit = int(metadata.get("section_hit") or 0)
+    metric_match = (
+        (source == "metrics_table" and (row_hit > 0 or bool(metadata.get("target_name"))))
+        or (source == "table" and bool(row_header))
+    )
+    statement_match = source == "primary_statement" or section_hit > 0
+    status = _year_status(item, requested_years)
+
+    features = {
+        "doc_match": doc_match,
+        "doc_unknown": doc_unknown,
+        "doc_mismatch": doc_mismatch,
+        "metric_match": metric_match,
+        "year_status": status,
+        "numeric_present": numeric_present,
+        "statement_match": statement_match,
+        "source_priority": _source_priority(item),
+    }
+
+    if doc_mismatch:
+        return _BUCKET_PRIORITY["weak_or_mismatch"], "weak_or_mismatch", features
+    if metric_match and numeric_present and status == "matched":
+        return _BUCKET_PRIORITY["exact_cell"], "exact_cell", features
+    if metric_match and numeric_present and status != "conflict":
+        return _BUCKET_PRIORITY["metric_cell"], "metric_cell", features
+    if statement_match and status != "conflict":
+        return _BUCKET_PRIORITY["statement"], "statement", features
+    if doc_match or doc_unknown:
+        if row_header or col_header or content:
+            return _BUCKET_PRIORITY["document"], "document", features
+    return _BUCKET_PRIORITY["weak_or_mismatch"], "weak_or_mismatch", features
 
 
 def _softmax_normalize(scores: list[float]) -> list[float]:

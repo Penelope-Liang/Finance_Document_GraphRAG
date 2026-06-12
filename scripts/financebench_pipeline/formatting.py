@@ -111,6 +111,8 @@ def _extract_gold_evidence(row: dict[str, Any]) -> Any:
 
 def _context_score(metadata: dict[str, Any]) -> Any:
     for key in (
+        "bucket_priority",
+        "base_score",
         "fused_score",
         "score",
         "similarity_score",

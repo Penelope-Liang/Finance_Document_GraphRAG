@@ -7,6 +7,7 @@ from financebench_pipeline.filing_constraints import (
     _company_name_from_doc_name,
     _company_name_from_question,
     _extract_year_window,
+    _target_filing_year_from_question,
 )
 from financebench_pipeline.utils import _normalize_text
 
@@ -27,6 +28,7 @@ def _rewrite_metrics_query_for_retrieval(
     company_from_doc = _company_name_from_doc_name(doc_name)
     company = company_from_question or company_from_doc
     years = _extract_year_window(question)
+    target_filing_year = _target_filing_year_from_question(question, llm=llm)
     clean = _normalize_text(question)
     components: list[str] = []
     statements: list[str] = []
@@ -194,6 +196,7 @@ def _rewrite_metrics_query_for_retrieval(
         "company_source": "question" if company_from_question else ("doc_name" if company_from_doc else None),
         "company_doc_key": _company_doc_key_from_company_name(company),
         "years": years,
+        "target_filing_year": target_filing_year,
         "operation": operation,
         "components": components,
         "statements": statements,

@@ -8,20 +8,6 @@ from typing import Any
 from financebench_pipeline.utils import _normalize_text
 
 
-_MONTH_NAMES = (
-    "january",
-    "february",
-    "march",
-    "april",
-    "may",
-    "june",
-    "july",
-    "august",
-    "september",
-    "october",
-    "november",
-    "december",
-)
 _MONTH_ALIASES = {
     "january": ("january", "jan"),
     "february": ("february", "feb"),
@@ -35,6 +21,20 @@ _MONTH_ALIASES = {
     "october": ("october", "oct"),
     "november": ("november", "nov"),
     "december": ("december", "dec"),
+}
+_MONTH_TO_NUMBER = {
+    "january": "01",
+    "february": "02",
+    "march": "03",
+    "april": "04",
+    "may": "05",
+    "june": "06",
+    "july": "07",
+    "august": "08",
+    "september": "09",
+    "october": "10",
+    "november": "11",
+    "december": "12",
 }
 
 _MIN_FILING_YEAR = 2010
@@ -69,6 +69,48 @@ Rules:
 
 Question:
 {question}
+"""
+_TARGET_FILING_YEAR_PROMPT = """You are extracting year constraints from a finance question.
+
+Return JSON only:
+{{"mentioned_years": ["<year>", "..."], "target_filing_year": "<year or null>", "reason": "<brief reason>"}}
+
+Rules:
+- The provided regex_years are the only candidate years. Do not invent other years.
+- Use regex_years as mentioned_years unless a normalized equivalent is needed.
+- target_filing_year is the year that should be used to restrict retrieval to a filing or report.
+- Use a year as target_filing_year when it refers to a reporting period, filing period, fiscal-year data, or historical financial period.
+- If the question contains one suitable reporting year, use it.
+- If the question contains a historical multi-year range or period comparison, use the latest suitable reporting year.
+- Do not use a year as target_filing_year if it is only a forecast year, guidance year, expected future period, future payment year, event date, transaction date, AGM date, or income-impact/event year.
+- If no suitable filing/reporting year is present, return null.
+
+Examples:
+- Question: What is the FY2017-FY2019 3 year average capital expenditure ratio?
+  regex_years: ["2019"]
+  Output: {{"mentioned_years": ["2019"], "target_filing_year": "2019", "reason": "Historical multi-year range; use the latest reporting year."}}
+
+- Question: Was there any change between Q2 of FY2024 and FY2023?
+  regex_years: ["2024"]
+  Output: {{"mentioned_years": ["2024"], "target_filing_year": "2024", "reason": "Period comparison; use the latest reporting year."}}
+
+- Question: What production changes is the company forecasting for FY2023?
+  regex_years: ["2023"]
+  Output: {{"mentioned_years": ["2023"], "target_filing_year": null, "reason": "FY2023 is only a forecast period."}}
+
+- Question: As of FY2021, how much did the company expect to pay in 2024?
+  regex_years: ["2021", "2024"]
+  Output: {{"mentioned_years": ["2021", "2024"], "target_filing_year": "2021", "reason": "FY2021 is the as-of reporting year; 2024 is a future payment year."}}
+
+- Question: Were there events that substantially increased net income in 2019?
+  regex_years: ["2019"]
+  Output: {{"mentioned_years": ["2019"], "target_filing_year": null, "reason": "2019 is an event or income-impact year, not an explicit filing year."}}
+
+Question:
+{question}
+
+regex_years:
+{regex_years}
 """
 _LEGAL_COMPANY_SUFFIXES = {
     "inc",
@@ -125,6 +167,16 @@ def _extract_years(text: str) -> list[str]:
         if year:
             years.add(year)
 
+    for match in re.finditer(r"\bfy\s*['’]?((?:19|20)\d{2}|\d{2})\s*q[1-4]\b", clean):
+        year = _normalize_year_token(match.group(1))
+        if year:
+            years.add(year)
+
+    for match in re.finditer(r"\b((?:19|20)\d{2})\s*q[1-4]\b", clean):
+        year = _normalize_year_token(match.group(1))
+        if year:
+            years.add(year)
+
     for match in re.finditer(r"\bq[1-4]\s*(?:of\s*)?(?:fy\s*)?((?:19|20)\d{2})\b", clean):
         year = _normalize_year_token(match.group(1))
         if year:
@@ -138,6 +190,7 @@ def _extract_years(text: str) -> list[str]:
 
 
 def _extract_months(text: str) -> list[str]:
+    """Extract month-level temporal cues only; calendar days are ignored."""
     hits: list[str] = []
     for month, aliases in _MONTH_ALIASES.items():
         for alias in aliases:
@@ -253,13 +306,9 @@ def _company_name_from_doc_name(doc_name: str | None) -> str | None:
     stem = Path(str(doc_name)).stem.upper()
     prefix = re.split(r"_(?:19|20)\d{2}", stem, maxsplit=1)[0]
     return _DOC_PREFIX_TO_COMPANY_NAME.get(prefix)
-def _company_name_from_question(question: str | None, llm: Any | None = None) -> str | None:
-    if not question or llm is None:
-        return None
-    try:
-        raw = llm.invoke(_COMPANY_EXTRACTION_PROMPT.format(question=question)).content.strip()
-    except Exception:
-        return None
+
+
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
@@ -270,6 +319,19 @@ def _company_name_from_question(question: str | None, llm: Any | None = None) ->
             payload = json.loads(match.group(0))
         except json.JSONDecodeError:
             return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _company_name_from_question(question: str | None, llm: Any | None = None) -> str | None:
+    if not question or llm is None:
+        return None
+    try:
+        raw = llm.invoke(_COMPANY_EXTRACTION_PROMPT.format(question=question)).content.strip()
+    except Exception:
+        return None
+    payload = _parse_json_object(raw)
+    if not payload:
+        return None
     company = payload.get("company")
     if company is None:
         return None
@@ -277,6 +339,36 @@ def _company_name_from_question(question: str | None, llm: Any | None = None) ->
     if not company_text or company_text.lower() == "null":
         return None
     return company_text
+
+
+def _target_filing_year_from_question(
+    question: str,
+    *,
+    years: list[str] | None = None,
+    llm: Any | None = None,
+) -> str | None:
+    regex_years = list(dict.fromkeys(years or _extract_years(question)))
+    if not regex_years or llm is None:
+        return None
+    try:
+        raw = llm.invoke(
+            _TARGET_FILING_YEAR_PROMPT.format(
+                question=question,
+                regex_years=json.dumps(regex_years, ensure_ascii=False),
+            )
+        ).content.strip()
+    except Exception:
+        return None
+    payload = _parse_json_object(raw)
+    if not payload:
+        return None
+    target = payload.get("target_filing_year")
+    if target is None:
+        return None
+    target_year = _normalize_year_token(str(target))
+    if target_year and target_year in set(regex_years):
+        return target_year
+    return None
 
 
 def _company_match_tokens(company: str | None) -> list[str]:
@@ -329,93 +421,85 @@ def _doc_company_prefix(doc_id: str) -> str:
     return re.split(r"_(?:19|20)\d{2}", stem, maxsplit=1)[0].lower()
 
 
+def _doc_matches_year(doc_id: str, year: str | None) -> bool:
+    return not year or str(year) in Path(str(doc_id)).stem
+
+
+def _doc_matches_quarter(doc_id: str, quarters: list[str]) -> bool:
+    if not quarters:
+        return True
+    stem = Path(str(doc_id)).stem.upper()
+    return any(f"Q{quarter}" in stem for quarter in quarters)
+
+
+def _doc_matches_month(doc_id: str, months: list[str]) -> bool:
+    if not months:
+        return True
+    stem = Path(str(doc_id)).stem
+    return any(
+        month in _MONTH_TO_NUMBER and re.search(rf"[-_]{_MONTH_TO_NUMBER[month]}[-_]\d{{2}}\b", stem)
+        for month in months
+    )
+
+
+def _candidate_filing_doc_ids(
+    *,
+    question: str,
+    query_rewrite_plan: dict[str, Any],
+    available_doc_ids: list[str],
+) -> tuple[list[str], str | None, str | None]:
+    company_doc_key = query_rewrite_plan.get("company_doc_key")
+
+    constraints = _extract_question_constraints(question)
+    target_year = query_rewrite_plan.get("target_filing_year")
+    quarters = constraints["quarters"]
+    months = constraints["months"]
+
+    # Apply whatever was extracted jointly; absent constraints simply pass through.
+    # Company is no longer mandatory.  Month alone is too weak to trigger a hard,
+    # cross-company doc filter, so it does not on its own narrow the corpus.
+    if not (company_doc_key or target_year or quarters):
+        return [], company_doc_key, None
+
+    base_candidates = [
+        doc_id
+        for doc_id in available_doc_ids
+        if (not company_doc_key or _doc_company_prefix(doc_id) == str(company_doc_key).lower())
+        and _doc_matches_year(doc_id, target_year)
+        and _doc_matches_quarter(doc_id, quarters)
+    ]
+    candidates = [doc_id for doc_id in base_candidates if _doc_matches_month(doc_id, months)]
+    if months and not candidates:
+        candidates = base_candidates
+    if not candidates:
+        return [], company_doc_key, None
+
+    source_parts = []
+    if company_doc_key:
+        source_parts.append("question_company")
+    if target_year:
+        source_parts.append("target_year")
+    if quarters:
+        source_parts.append("quarter")
+    if months and candidates != base_candidates:
+        source_parts.append("month")
+    return sorted(candidates), company_doc_key, "_".join(source_parts) or None
+
+
 def _infer_filing_doc_id(
     *,
     question: str,
     query_rewrite_plan: dict[str, Any],
     available_doc_ids: list[str],
 ) -> tuple[str | None, str | None]:
-    company_doc_key = query_rewrite_plan.get("company_doc_key")
-    if not company_doc_key:
-        company_doc_key = _company_doc_key_from_company_name(_company_name_from_question(question))
-    if not company_doc_key:
-        return None, None
-
-    constraints = _extract_question_constraints(question)
-    years = list(dict.fromkeys(list(query_rewrite_plan.get("years") or []) + constraints["years"]))
-    quarters = constraints["quarters"]
-    clean = _normalize_text(question)
-    wants_quarterly = bool(quarters) or "10-q" in clean or "10q" in clean or "quarter" in clean
-    wants_annual = (
-        "10-k" in clean
-        or "10k" in clean
-        or "annual report" in clean
-        or (bool(years) and not wants_quarterly)
+    candidate_doc_ids, _, doc_id_source = _candidate_filing_doc_ids(
+        question=question,
+        query_rewrite_plan=query_rewrite_plan,
+        available_doc_ids=available_doc_ids,
     )
-
-    # For multi-year annual questions (ratios, averages, YoY, CAGR) the target
-    # filing is the latest year's 10-K, because a 10-K carries prior-year
-    # comparative columns (e.g. the FY2017 10-K contains FY2015-FY2017 income
-    # statements). Earlier filings can never contain later years' data.
-    latest_year = str(max(int(year) for year in years)) if years else None
-
-    scored: list[tuple[float, str]] = []
-    for doc_id in available_doc_ids:
-        if _doc_company_prefix(doc_id) != str(company_doc_key).lower():
-            continue
-        stem = Path(doc_id).stem.upper()
-        is_annual_doc = "_10K" in stem or "ANNUALREPORT" in stem
-        score = 0.0
-
-        if quarters:
-            for quarter in quarters:
-                for year in years:
-                    if f"{year}Q{quarter}" in stem:
-                        score += 8.0
-                if f"Q{quarter}" in stem:
-                    score += 1.0
-
-        for year in years:
-            if year in stem:
-                score += 2.0
-
-        if wants_quarterly and ("_10Q" in stem or re.search(r"(?:19|20)\d{2}Q[1-4]", stem)):
-            score += 1.0
-        if wants_annual and is_annual_doc:
-            score += 1.0
-
-        # Latest-year tie-breaker: only fires for annual questions with no
-        # quarter, and only when the latest year's annual filing actually
-        # exists in the candidate list, so missing-filing cases stay ambiguous.
-        if (
-            wants_annual
-            and not quarters
-            and latest_year
-            and is_annual_doc
-            and latest_year in stem
-        ):
-            score += 3.0
-
-        if not years and not quarters:
-            continue
-        if score > 0:
-            scored.append((score, doc_id))
-
-    if not scored:
-        return None, None
-
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    top_score, top_doc_id = scored[0]
-    runner_up = scored[1][0] if len(scored) > 1 else -1.0
-
-    # A year+quarter match is high-confidence. A company+year match is also
-    # sufficient when it uniquely identifies one filing; many questions mention
-    # only fiscal year and company, without an explicit 10-K/10-Q label.
-    if quarters and top_score >= 8.0:
-        return top_doc_id, "question_company_period"
-    if top_score >= 2.0 and top_score > runner_up:
-        return top_doc_id, "question_company_period"
-    return None, None
+    if len(candidate_doc_ids) == 1:
+        return candidate_doc_ids[0], doc_id_source
+    return None, doc_id_source
 
 
 def _extract_year_window(question: str) -> list[str]:
