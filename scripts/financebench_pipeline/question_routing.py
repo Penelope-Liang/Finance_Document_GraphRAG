@@ -52,13 +52,33 @@ def extract_json_object(text: str) -> str | None:
 
 
 def classify_question_style_auto(question: str) -> tuple[str, float, str]:
-    """Rule-only router: metrics-calculation vs direct single-value extraction."""
+    """Rule-only router for FinanceBench question styles."""
     q = (question or "").lower()
+    domain_hits: list[str] = []
     hits: list[str] = []
 
     def hit(tag: str) -> None:
         if tag not in hits:
             hits.append(tag)
+
+    def domain_hit(tag: str) -> None:
+        if tag not in domain_hits:
+            domain_hits.append(tag)
+
+    if "capital-intensive" in q or "capital intensive" in q:
+        domain_hit("capital_intensity")
+    if "what drove" in q or "what drives" in q or "driven by" in q:
+        domain_hit("drivers")
+    if re.search(r"\bwhy\b", q) or "due to" in q or "primarily due" in q:
+        domain_hit("causal_explanation")
+    if any(phrase in q for phrase in ("useful metric", "meaningful metric", "relevant metric", "not a useful metric")):
+        domain_hit("metric_applicability")
+    if any(phrase in q for phrase in ("business based on", "financial health", "liquidity profile", "margin profile")):
+        domain_hit("business_judgment")
+
+    if domain_hits:
+        conf = min(0.98, 0.78 + 0.04 * len(domain_hits))
+        return "domain", conf, "matched: " + ", ".join(domain_hits)
 
     if "defined as" in q:
         hit("defined_as")

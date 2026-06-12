@@ -427,6 +427,12 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
     if "operating cash flow ratio" in clean:
         add("operating_cash_flow")
         add("current_liabilities")
+    if "capital-intensive" in clean or "capital intensive" in clean:
+        add("capex")
+        add("revenue")
+        add("ppne")
+        add("total_assets")
+        add("net_income")
     if "capex" in clean or "capital expenditure" in clean or "capital expenditures" in clean:
         add("capex")
     if "% of revenue" in clean or "percent of revenue" in clean or "percentage of revenue" in clean:
@@ -435,6 +441,12 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
         add("revenue")
     if "operating income" in clean or "income from operations" in clean:
         add("operating_income")
+    if "operating margin" in clean or "operating income margin" in clean:
+        add("operating_income")
+        add("revenue")
+    if "gross margin" in clean:
+        add("revenue")
+        add("cogs")
     if "working capital ratio" in clean or "current ratio" in clean:
         add("current_assets")
         add("current_liabilities")
@@ -470,9 +482,17 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
         add("operating_cash_flow")
         add("capex")
 
-    # Fall back to query-rewriter components if no explicit formula pattern fired.
-    if not targets and plan:
+    # Merge query-rewriter components as additional table-cell targets. Domain
+    # questions often mention only a business judgment in the raw question, while
+    # the rewrite expands the financial inputs needed for that judgment.
+    if plan:
         component_text = _normalize_text(" ".join(str(c) for c in plan.get("components") or []))
+        if "operating margin" in component_text or "operating income margin" in component_text:
+            add("operating_income")
+            add("revenue")
+        if "gross margin" in component_text:
+            add("revenue")
+            add("cogs")
         for name, spec in _METRICS_TABLE_TARGETS.items():
             if any(alias in component_text for alias in spec["aliases"]):
                 add(name)
