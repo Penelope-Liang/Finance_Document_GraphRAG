@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 
@@ -13,7 +14,11 @@ from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResu
 
 from financebench_pipeline.filing_constraints import _extract_question_constraints
 from financebench_pipeline.formatting import _format_chunk_record, _format_table_record
-from financebench_pipeline.fusion import _evidence_bucket, _item_base_score
+from financebench_pipeline.fusion import (
+    _attach_fusion_scores,  # noqa: F401  # kept for commented-out soft-fusion fallback
+    _evidence_bucket,
+    _item_base_score,
+)
 from financebench_pipeline.query_rewriting import (
     _METRICS_TABLE_TARGETS,
     _metrics_component_targets,
@@ -27,6 +32,29 @@ from financebench_pipeline.utils import (
     _sanitize_retriever_result,
     _sanitize_value,
 )
+
+
+def _build_cross_encoder(model_name: str) -> Any:
+    from sentence_transformers import CrossEncoder
+
+    config_args: dict[str, Any] = {}
+    try:
+        import torch
+
+        config_args = {"torch_dtype": torch.bfloat16, "attn_implementation": "eager"}
+    except Exception:
+        config_args = {}
+
+    kwargs: dict[str, Any] = {"trust_remote_code": True}
+    if config_args:
+        kwargs["config_args"] = config_args
+    try:
+        return CrossEncoder(model_name, **kwargs)
+    except TypeError:
+        try:
+            return CrossEncoder(model_name, trust_remote_code=True)
+        except TypeError:
+            return CrossEncoder(model_name)
 
 
 
@@ -423,12 +451,24 @@ class DualRetriever(Retriever):
         primary_retriever: PrimaryStatementRetriever | None = None,
         metrics_retriever: MetricsTableCellRetriever | None = None,
         neo4j_database: str | None = None,
+        reranker_model: str | None = None,
+        reranker_batch_size: int = 8,
     ) -> None:
         super().__init__(driver, neo4j_database)
         self.chunk_retriever = chunk_retriever
         self.table_retriever = table_retriever
         self.primary_retriever = primary_retriever
         self.metrics_retriever = metrics_retriever
+        self.reranker_model = reranker_model or os.environ.get("RERANKER_MODEL")
+        self.reranker_batch_size = reranker_batch_size
+        self._reranker: Any | None = None
+
+    def _get_reranker(self) -> Any:
+        if self._reranker is None:
+            if not self.reranker_model:
+                raise RuntimeError("reranker model is not configured")
+            self._reranker = _build_cross_encoder(self.reranker_model)
+        return self._reranker
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
         raise NotImplementedError("DualRetriever uses a custom search implementation.")
@@ -552,16 +592,22 @@ class DualRetriever(Retriever):
             seen_contents.add(content)
             items.append(item)
 
-        # Deterministic constraint-bucket ranking.
-        # Hard financial constraints (doc / metric / period / numeric cell) decide
-        # the bucket (tier); a simple per-source base score breaks ties within a
-        # bucket. No tunable fusion weights, no reranker. Items are demoted, never
-        # dropped, so recall is preserved.
+        # --- OLD soft-fusion ranking (tunable magic-number weights); kept for ablation ---
+        # fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
+        # items = _attach_fusion_scores(fusion_question, items)
+        # items.sort(
+        #     key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
+        #     reverse=True,
+        # )
+
+        # Bucket labels are retained only as audit/debug metadata. They do not
+        # decide global ordering; the CrossEncoder reranker scores query-evidence
+        # relevance directly.
         requested_years = list((metrics_plan or {}).get("years") or [])
         if not requested_years:
             requested_years = list(_extract_question_constraints(search_text)["years"])
 
-        ranked: list[tuple[int, int, float, RetrieverResultItem]] = []
+        annotated_items: list[RetrieverResultItem] = []
         for item in items:
             priority, bucket, features = _evidence_bucket(
                 item,
@@ -576,18 +622,57 @@ class DualRetriever(Retriever):
             metadata["bucket_features"] = features
             metadata["source_priority"] = source_priority
             metadata["base_score"] = base_score
-            ranked.append(
-                (
-                    priority,
-                    source_priority,
-                    base_score,
-                    _sanitize_retriever_item(
-                        RetrieverResultItem(content=item.content, metadata=metadata)
-                    ),
+            annotated_items.append(
+                _sanitize_retriever_item(
+                    RetrieverResultItem(content=item.content, metadata=metadata)
                 )
             )
-        ranked.sort(key=lambda entry: (entry[0], entry[1], entry[2]), reverse=True)
-        items = [item for _, _, _, item in ranked]
+
+        ranking_metadata: dict[str, Any] = {
+            "strategy": "cross_encoder_reranker",
+            "reranker_model": self.reranker_model,
+            "bucket_usage": "audit_only",
+            "fallback": None,
+            "requested_years": requested_years,
+        }
+
+        items = annotated_items
+        if self.reranker_model and annotated_items:
+            try:
+                reranker = self._get_reranker()
+                pairs = [[search_text, str(item.content)] for item in annotated_items]
+                scores = reranker.predict(
+                    pairs,
+                    batch_size=self.reranker_batch_size,
+                    show_progress_bar=False,
+                )
+                if hasattr(scores, "tolist"):
+                    scores = scores.tolist()
+
+                reranked: list[tuple[float, int, RetrieverResultItem]] = []
+                for index, (score, item) in enumerate(zip(scores, annotated_items, strict=True)):
+                    metadata = dict(item.metadata or {})
+                    metadata["reranker_score"] = float(score)
+                    reranked.append(
+                        (
+                            float(score),
+                            index,
+                            _sanitize_retriever_item(
+                                RetrieverResultItem(content=item.content, metadata=metadata)
+                            ),
+                        )
+                    )
+                reranked.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+                items = [item for _, _, item in reranked]
+                ranking_metadata["reranked"] = True
+            except Exception as exc:
+                ranking_metadata["reranked"] = False
+                ranking_metadata["fallback"] = "original_merged_order"
+                ranking_metadata["error"] = str(exc)
+                items = annotated_items
+        else:
+            ranking_metadata["reranked"] = False
+            ranking_metadata["fallback"] = "original_merged_order"
 
         return _sanitize_retriever_result(RetrieverResult(
             items=items,
@@ -598,17 +683,6 @@ class DualRetriever(Retriever):
                 "table_retriever": table_result.metadata,
                 "primary_retriever": primary_result.metadata,
                 "retrieval_query_text": search_text,
-                "ranking": {
-                    "strategy": "constraint_bucket_then_base_score",
-                    "bucket_priority": {
-                        "exact_cell": 5,
-                        "metric_cell": 4,
-                        "statement": 3,
-                        "document": 2,
-                        "weak_or_mismatch": 1,
-                    },
-                    "tie_break": "source_priority_then_per_source_base_score",
-                    "requested_years": requested_years,
-                },
+                "ranking": ranking_metadata,
             },
         ))
