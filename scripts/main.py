@@ -186,7 +186,10 @@ def main() -> None:
     parser.add_argument(
         "--use-reranker",
         action="store_true",
-        help="Wrap the chosen retriever with the existing CrossEncoder reranker.",
+        help=(
+            "Wrap hybrid/text2cypher retrieval with the existing CrossEncoder reranker. "
+            "Dual retrieval uses --reranker-model internally."
+        ),
     )
     parser.add_argument(
         "--reranker-model",
@@ -383,8 +386,9 @@ def main() -> None:
                 primary_retriever=primary_retriever,
                 metrics_retriever=metrics_retriever,
                 neo4j_database=database,
+                reranker_model=args.reranker_model,
             )
-        if args.use_reranker:
+        if args.use_reranker and args.retriever_mode != "dual":
             retriever = RerankingRetriever(
                 inner_retriever=retriever,
                 cross_encoder_model=args.reranker_model,
