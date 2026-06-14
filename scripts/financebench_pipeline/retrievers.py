@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections import defaultdict
+from contextlib import nullcontext
 from typing import Any
 
 import neo4j
@@ -34,20 +36,77 @@ from financebench_pipeline.utils import (
 )
 
 
-def _build_cross_encoder(model_name: str) -> Any:
+class _AutoModelListwiseReranker:
+    def __init__(self, model: Any) -> None:
+        self.model = model
+        if hasattr(self.model, "eval"):
+            self.model.eval()
+
+    def predict(
+        self,
+        pairs: list[list[str]],
+        batch_size: int | None = None,
+        show_progress_bar: bool = False,
+    ) -> list[float]:
+        del batch_size, show_progress_bar
+        grouped: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        for index, pair in enumerate(pairs):
+            query, document = pair
+            grouped[str(query)].append((index, str(document)))
+
+        scores = [0.0] * len(pairs)
+        try:
+            import torch
+
+            inference_context = torch.inference_mode()
+        except Exception:
+            inference_context = nullcontext()
+
+        with inference_context:
+            for query, docs_with_index in grouped.items():
+                documents = [document for _, document in docs_with_index]
+                results = self.model.rerank(query, documents)
+                for result in results:
+                    result_index = int(result["index"])
+                    original_index = docs_with_index[result_index][0]
+                    scores[original_index] = float(result["relevance_score"])
+        return scores
+
+
+def _build_reranker(model_name: str) -> Any:
+    try:
+        from transformers import AutoModel
+
+        try:
+            model = AutoModel.from_pretrained(
+                model_name,
+                dtype="auto",
+                trust_remote_code=True,
+            )
+        except TypeError:
+            model = AutoModel.from_pretrained(
+                model_name,
+                torch_dtype="auto",
+                trust_remote_code=True,
+            )
+        if hasattr(model, "rerank"):
+            return _AutoModelListwiseReranker(model)
+    except Exception:
+        pass
+
     from sentence_transformers import CrossEncoder
 
-    config_args: dict[str, Any] = {}
+    config_kwargs: dict[str, Any] = {}
     try:
         import torch
 
-        config_args = {"torch_dtype": torch.bfloat16, "attn_implementation": "eager"}
+        config_kwargs = {"torch_dtype": torch.bfloat16, "attn_implementation": "eager"}
     except Exception:
-        config_args = {}
+        config_kwargs = {}
 
     kwargs: dict[str, Any] = {"trust_remote_code": True}
-    if config_args:
-        kwargs["config_args"] = config_args
+    if config_kwargs:
+        kwargs["config_kwargs"] = config_kwargs
     try:
         return CrossEncoder(model_name, **kwargs)
     except TypeError:
@@ -467,7 +526,7 @@ class DualRetriever(Retriever):
         if self._reranker is None:
             if not self.reranker_model:
                 raise RuntimeError("reranker model is not configured")
-            self._reranker = _build_cross_encoder(self.reranker_model)
+            self._reranker = _build_reranker(self.reranker_model)
         return self._reranker
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
