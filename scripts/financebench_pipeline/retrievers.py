@@ -651,14 +651,6 @@ class DualRetriever(Retriever):
             seen_contents.add(content)
             items.append(item)
 
-        # --- OLD soft-fusion ranking (tunable magic-number weights); kept for ablation ---
-        # fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
-        # items = _attach_fusion_scores(fusion_question, items)
-        # items.sort(
-        #     key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
-        #     reverse=True,
-        # )
-
         # Bucket labels are retained only as audit/debug metadata. They do not
         # decide global ordering; the CrossEncoder reranker scores query-evidence
         # relevance directly.
@@ -686,6 +678,18 @@ class DualRetriever(Retriever):
                     RetrieverResultItem(content=item.content, metadata=metadata)
                 )
             )
+
+        def _soft_fusion_rank(items_to_rank: list[RetrieverResultItem]) -> list[RetrieverResultItem]:
+            fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
+            fused_items = _attach_fusion_scores(fusion_question, items_to_rank)
+            fused_items.sort(
+                key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
+                reverse=True,
+            )
+            return [
+                _sanitize_retriever_item(item)
+                for item in fused_items
+            ]
 
         ranking_metadata: dict[str, Any] = {
             "strategy": "cross_encoder_reranker",
@@ -726,12 +730,14 @@ class DualRetriever(Retriever):
                 ranking_metadata["reranked"] = True
             except Exception as exc:
                 ranking_metadata["reranked"] = False
-                ranking_metadata["fallback"] = "original_merged_order"
+                ranking_metadata["fallback"] = "source_softmax_plus_constraint_bonus"
                 ranking_metadata["error"] = str(exc)
-                items = annotated_items
+                items = _soft_fusion_rank(annotated_items)
         else:
+            items = _soft_fusion_rank(annotated_items)
+            ranking_metadata["strategy"] = "source_softmax_plus_constraint_bonus"
             ranking_metadata["reranked"] = False
-            ranking_metadata["fallback"] = "original_merged_order"
+            ranking_metadata["fallback"] = None
 
         return _sanitize_retriever_result(RetrieverResult(
             items=items,
