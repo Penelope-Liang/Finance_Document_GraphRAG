@@ -133,6 +133,11 @@ def build_information_extraction_prompt(question: str) -> str:
         "- If the exact wording does not appear, pay attention to semantically similar section/table names rather than ignoring the constraint.",
         "- Respect time constraints strictly: fiscal year, quarter, period-ended phrasing, and explicit dates must match the chosen evidence.",
         "- If candidate evidence conflicts on statement type or time period, prefer the exact match and avoid mixing periods.",
+        "- Structured Table evidence is valid financial statement evidence. If the row header, column header, section, and period match the question, use the table cell's text, numeric_value, and scale directly.",
+        "Example:",
+        "Question: What is the year-end net PP&E in USD billions?",
+        "Evidence: Table evidence row='Property, plant and equipment, net'; col='December 31, 20XX'; text='8,000'; numeric_value=8000.0; scale='million'",
+        'Answer: {"answer": "$8.0 billion", "evidence": "Used Property, plant and equipment, net for the requested year; converted 8,000 million to 8.0 billion.", "missing_information": null}',
     ]
     return _append_constraint_lines(lines, constraints)
 
