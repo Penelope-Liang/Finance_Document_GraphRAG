@@ -67,6 +67,10 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
             "section_name": section_name or None,
             "row_header": row_header,
             "col_header": col_header,
+            "text": text,
+            "numeric_value": numeric_value,
+            "numeric_kind": numeric_kind,
+            "scale": scale,
             "source": "table",
         }),
     )

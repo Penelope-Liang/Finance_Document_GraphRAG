@@ -41,6 +41,7 @@ from financebench_pipeline.utils import (
     _save_results,
 )
 from financebench_pipeline.query_rewriting import _rewrite_metrics_query_for_retrieval
+from financebench_pipeline.direct_fallback import _direct_table_cell_fallback
 from financebench_pipeline.retrievers import (
     DualRetriever,
     LLMJudgeRetriever,
@@ -256,6 +257,14 @@ def main() -> None:
         help=(
             "For calculation questions only, ask a coder model for a JSON formula plan, "
             "safely evaluate it, and write the computed result back to answer."
+        ),
+    )
+    parser.add_argument(
+        "--use-direct-table-fallback",
+        action="store_true",
+        help=(
+            "For direct questions only, when the LLM returns no answer, deterministically "
+            "build a numeric answer from the top exact_cell/metric_cell TableCell evidence."
         ),
     )
     parser.add_argument(
@@ -562,6 +571,25 @@ def main() -> None:
                         evidence = (
                             f"{evidence}\n\n" if evidence else ""
                         ) + "Calculation executor applied."
+
+                answer_source = "llm"
+                direct_table_fallback = None
+                if (
+                    args.use_direct_table_fallback
+                    and answer is None
+                    and effective_style == "direct"
+                ):
+                    fallback_answer, direct_table_fallback = _direct_table_cell_fallback(
+                        question_text,
+                        retrieved_contexts,
+                    )
+                    if fallback_answer is not None:
+                        answer = fallback_answer
+                        evidence = (
+                            f"{evidence}\n\n" if evidence else ""
+                        ) + "Deterministic direct extraction from TableCell."
+                        missing_information = None
+                        answer_source = "deterministic_table_cell"
                 elapsed = round(time.time() - start, 2)
                 results.append(
                     {
@@ -580,6 +608,8 @@ def main() -> None:
                             embedding_model=embedding_model,
                         ),
                         "answer": answer,
+                        "answer_source": answer_source,
+                        "direct_table_fallback": direct_table_fallback,
                         "evidence": evidence,
                         "missing_information": missing_information,
                         "raw_answer": raw_answer,
