@@ -30,6 +30,7 @@ from financebench_pipeline.retrieval_queries import METRICS_TABLE_CELL_QUERY, PR
 from financebench_pipeline.utils import (
     _extract_json_object,
     _safe_float,
+    _sanitize_for_json,
     _sanitize_retriever_item,
     _sanitize_retriever_result,
     _sanitize_value,
