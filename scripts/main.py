@@ -121,6 +121,13 @@ def _build_run_config(
     }
 
 
+def _requires_calculation_executor(row: dict[str, Any], effective_style: str) -> bool:
+    reasoning = str(row.get("question_reasoning") or "").strip().lower()
+    if reasoning == "numerical reasoning":
+        return True
+    return effective_style == "calculation"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run FinanceBench QA with RAG or GraphRAG retrieval.")
     parser.add_argument(
@@ -429,6 +436,11 @@ def main() -> None:
                 q_style_conf = 1.0
                 q_style_reason = "cli_fixed"
                 q_style_raw = None
+            if str(row.get("question_reasoning") or "").strip().lower() == "numerical reasoning":
+                if effective_style != "calculation":
+                    q_style_reason = f"dataset_question_reasoning=numerical_reasoning; router={q_style_reason}"
+                    q_style_conf = 1.0
+                effective_style = "calculation"
             style_fields = {
                 "question_style_mode": args.question_style,
                 "question_style": effective_style,
@@ -540,11 +552,16 @@ def main() -> None:
                     retriever_result_dump,
                     question_id=str(row["question_id"]),
                 )
+                answer_source = "llm"
                 llm_answer_before_calculation = None
                 calculation_executor = None
+                should_run_calculation_executor = _requires_calculation_executor(
+                    row,
+                    effective_style,
+                )
                 if (
                     args.use_calculation_executor
-                    and effective_style == "calculation"
+                    and should_run_calculation_executor
                     and calc_llm is not None
                 ):
                     llm_answer_before_calculation = answer
@@ -571,8 +588,8 @@ def main() -> None:
                         evidence = (
                             f"{evidence}\n\n" if evidence else ""
                         ) + "Calculation executor applied."
+                        answer_source = "calculation_executor"
 
-                answer_source = "llm"
                 direct_table_fallback = None
                 if (
                     args.use_direct_table_fallback

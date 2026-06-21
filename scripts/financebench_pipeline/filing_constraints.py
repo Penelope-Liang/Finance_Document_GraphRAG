@@ -486,22 +486,6 @@ def _candidate_filing_doc_ids(
     return sorted(candidates), company_doc_key, "_".join(source_parts) or None
 
 
-def _infer_filing_doc_id(
-    *,
-    question: str,
-    query_rewrite_plan: dict[str, Any],
-    available_doc_ids: list[str],
-) -> tuple[str | None, str | None]:
-    candidate_doc_ids, _, doc_id_source = _candidate_filing_doc_ids(
-        question=question,
-        query_rewrite_plan=query_rewrite_plan,
-        available_doc_ids=available_doc_ids,
-    )
-    if len(candidate_doc_ids) == 1:
-        return candidate_doc_ids[0], doc_id_source
-    return None, doc_id_source
-
-
 def _extract_year_window(question: str) -> list[str]:
     clean = _normalize_text(question)
     years = _extract_years(question)

@@ -77,6 +77,8 @@ def _item_base_score(item: RetrieverResultItem) -> float:
         return _safe_float(metadata.get("similarity_score"))
     if source == "table":
         return _table_base_score(item)
+    if source == "primary_statement_cell":
+        return _table_base_score(item) + 0.4
     if source == "metrics_table":
         return (
             _table_base_score(item)
@@ -140,6 +142,7 @@ def _source_priority(item: RetrieverResultItem) -> int:
     return {
         "metrics_table": 4,
         "table": 3,
+        "primary_statement_cell": 2,
         "primary_statement": 2,
         "chunk": 1,
     }.get(str(source), 0)
@@ -176,9 +179,9 @@ def _evidence_bucket(
     section_hit = int(metadata.get("section_hit") or 0)
     metric_match = (
         (source == "metrics_table" and (row_hit > 0 or bool(metadata.get("target_name"))))
-        or (source == "table" and bool(row_header))
+        or (source in {"table", "primary_statement_cell"} and bool(row_header))
     )
-    statement_match = source == "primary_statement" or section_hit > 0
+    statement_match = source in {"primary_statement", "primary_statement_cell"} or section_hit > 0
     status = _year_status(item, requested_years)
 
     features = {
@@ -252,6 +255,8 @@ def _attach_fusion_scores(
             source_weight = table_weight
         elif source == "metrics_table":
             source_weight = 2.2
+        elif source == "primary_statement_cell":
+            source_weight = 0.9
         elif source == "primary_statement":
             # Differentiated weight by match_priority:
             #   3 = both statement_type and section_name match (strongest signal)

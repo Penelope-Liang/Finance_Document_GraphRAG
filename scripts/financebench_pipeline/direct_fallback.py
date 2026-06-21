@@ -62,7 +62,7 @@ def _direct_table_cell_fallback(
     question: str,
     retrieved_contexts: list[dict[str, Any]],
     *,
-    max_evidence: int = 5,
+    max_evidence: int = 15,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Deterministically build a numeric answer from the top table-cell evidence.
 
@@ -78,7 +78,7 @@ def _direct_table_cell_fallback(
     for ctx in (retrieved_contexts or [])[:max_evidence]:
         metadata = ctx.get("metadata") if isinstance(ctx, dict) else None
         metadata = metadata or {}
-        if metadata.get("source") not in {"table", "metrics_table"}:
+        if metadata.get("source") not in {"table", "metrics_table", "primary_statement_cell"}:
             continue
         if metadata.get("bucket") not in {"exact_cell", "metric_cell"}:
             continue

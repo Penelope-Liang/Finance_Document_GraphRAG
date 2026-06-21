@@ -481,6 +481,37 @@ class PrimaryStatementRetriever(Retriever):
                     RetrieverResultItem(content=item.content, metadata=metadata)
                 )
             )
+            for cell in _sanitize_for_json(record.get("table_cells") or []):
+                if not isinstance(cell, dict):
+                    continue
+                if cell.get("numeric_value") is None:
+                    continue
+                if not (cell.get("row_header") or cell.get("col_header")):
+                    continue
+                cell_record = {
+                    "doc_id": record.get("doc_id"),
+                    "section_name": record.get("section_name"),
+                    "row_header": cell.get("row_header"),
+                    "col_header": cell.get("col_header"),
+                    "text": cell.get("text"),
+                    "numeric_value": cell.get("numeric_value"),
+                    "numeric_kind": cell.get("numeric_kind"),
+                    "scale": cell.get("scale"),
+                }
+                cell_item = _format_table_record(cell_record)
+                cell_metadata = dict(cell_item.metadata or {})
+                cell_metadata["source"] = "primary_statement_cell"
+                cell_metadata["statement_type"] = spec["name"]
+                cell_metadata["chunk_statement_type"] = _sanitize_value(
+                    record.get("chunk_statement_type")
+                )
+                cell_metadata["parent_section_name"] = _sanitize_value(record.get("section_name"))
+                cell_metadata["match_priority"] = int(record.get("match_priority") or 0)
+                items.append(
+                    _sanitize_retriever_item(
+                        RetrieverResultItem(content=cell_item.content, metadata=cell_metadata)
+                    )
+                )
 
         return _sanitize_retriever_result(RetrieverResult(
             items=items,
