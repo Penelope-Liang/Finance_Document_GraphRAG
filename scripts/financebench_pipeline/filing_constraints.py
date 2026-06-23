@@ -488,7 +488,16 @@ def _candidate_filing_doc_ids(
 
 def _extract_year_window(question: str) -> list[str]:
     clean = _normalize_text(question)
-    years = _extract_years(question)
+    years = set(_extract_years(question))
+    range_pattern = re.compile(
+        rf"\b({_YEAR_TOKEN_PATTERN})\s*(?:-|‐|‑|‒|–|—|\bto\b)\s*({_YEAR_TOKEN_PATTERN})\b"
+    )
+    for match in range_pattern.finditer(clean):
+        start_year = _normalize_year_token(match.group(1))
+        end_year = _normalize_year_token(match.group(2))
+        if start_year and end_year:
+            years.add(str(min(int(start_year), int(end_year))))
+            years.add(str(max(int(start_year), int(end_year))))
     if not years:
         return []
     numeric_years = sorted(int(year) for year in years)

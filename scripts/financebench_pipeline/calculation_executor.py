@@ -33,6 +33,8 @@ Rules:
    derived value is explicitly reported in the evidence. Instead, extract the
    underlying period values separately and compute the average or change inside
    the formula.
+   If the question defines "change in X between FYA and FYB", required_inputs
+   must be X_FYA and X_FYB, and the formula must compute X_FYB - X_FYA.
 7. For example, if a calculation needs average working capital, do not create one
    required input named average_working_capital unless that exact value is
    reported. Instead, create current_assets_2022, current_liabilities_2022,

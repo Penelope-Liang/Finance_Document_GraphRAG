@@ -52,6 +52,10 @@ from financebench_pipeline.retrievers import (
 )
 from financebench_pipeline.retrieval_scope import _build_retrieval_filter
 from financebench_pipeline.retrieval_queries import CHUNK_RETRIEVAL_QUERY
+from financebench_pipeline.scope_report import (
+    build_observed_limitations as _build_observed_limitations,
+    build_planned_scope as _build_planned_scope,
+)
 from financebench_pipeline.formatting import (
     _compact_retriever_evidence,
     _extract_gold_evidence,
@@ -498,6 +502,13 @@ def main() -> None:
             query_rewrite_fields["retrieval_doc_ids"] = retrieval_filter.get("doc_ids")
             query_rewrite_fields["retrieval_doc_id_source"] = retrieval_filter.get("doc_id_source")
             query_rewrite_fields["retrieval_company_doc_key"] = retrieval_filter.get("company_doc_key")
+            planned_scope = _build_planned_scope(
+                args=args,
+                row=row,
+                effective_style=effective_style,
+                query_rewrite_plan=query_rewrite_plan,
+                retrieval_filter=retrieval_filter,
+            )
             start = time.time()
             try:
                 search_kwargs = {
@@ -608,6 +619,13 @@ def main() -> None:
                         missing_information = None
                         answer_source = "deterministic_table_cell"
                 elapsed = round(time.time() - start, 2)
+                observed_scope = _build_observed_limitations(
+                    planned_scope=planned_scope,
+                    retrieved_contexts=retrieved_contexts,
+                    answer=answer,
+                    answer_source=answer_source,
+                    missing_information=missing_information,
+                )
                 results.append(
                     {
                         "question_id": row["question_id"],
@@ -632,6 +650,8 @@ def main() -> None:
                         "raw_answer": raw_answer,
                         "llm_answer_before_calculation": llm_answer_before_calculation,
                         "calculation_executor": calculation_executor,
+                        "planned_scope": planned_scope,
+                        "observed_scope": observed_scope,
                         "retriever_result": retriever_result_dump,
                         "time_seconds": elapsed,
                         "error": None,
@@ -643,6 +663,14 @@ def main() -> None:
                 print(f"  answer={answer!r} gold={row['gold_answer']}", flush=True)
             except Exception as exc:
                 elapsed = round(time.time() - start, 2)
+                observed_scope = _build_observed_limitations(
+                    planned_scope=planned_scope,
+                    retrieved_contexts=[],
+                    answer=None,
+                    answer_source=None,
+                    missing_information=None,
+                    error=str(exc),
+                )
                 results.append(
                     {
                         "question_id": row["question_id"],
@@ -663,6 +691,8 @@ def main() -> None:
                         "evidence": None,
                         "missing_information": None,
                         "raw_answer": None,
+                        "planned_scope": planned_scope,
+                        "observed_scope": observed_scope,
                         "retriever_result": None,
                         "time_seconds": elapsed,
                         "error": str(exc),

@@ -96,6 +96,9 @@ def _rewrite_metrics_query_for_retrieval(
         if "ebitda" in clean:
             add_component("EBITDA")
             add_component("adjusted EBITDA")
+            if "margin" in clean or "% of revenue" in clean or "percent" in clean:
+                add_component("revenue")
+                add_statement("consolidated statement of operations")
         if "cogs" in clean or "cost of goods sold" in clean or "cost of sales" in clean:
             add_component("cost of goods sold")
             add_component("cost of sales")
@@ -478,6 +481,8 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
     if "ebitda" in clean:
         add("operating_income")
         add("depreciation_amortization")
+        if "margin" in clean or "% of revenue" in clean or "percent" in clean:
+            add("revenue")
     if "free cash flow" in clean or "fcf" in clean:
         add("operating_cash_flow")
         add("capex")
