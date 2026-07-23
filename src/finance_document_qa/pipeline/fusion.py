@@ -5,8 +5,14 @@ import re
 
 from neo4j_graphrag.types import RetrieverResultItem
 
-from financebench_pipeline.filing_constraints import _extract_question_constraints
-from financebench_pipeline.utils import _normalize_text, _safe_float, _sanitize_for_json
+from finance_document_qa.pipeline.filing_constraints import (
+    _extract_question_constraints,
+)
+from finance_document_qa.pipeline.utils import (
+    _normalize_text,
+    _safe_float,
+    _sanitize_for_json,
+)
 
 
 def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
@@ -45,7 +51,9 @@ def _candidate_bonus(question: str, item: RetrieverResultItem) -> float:
             score += 1.0
 
     if metadata.get("source") == "table" and (
-        constraints["section_hints"] or constraints["years"] or constraints["period_hints"]
+        constraints["section_hints"]
+        or constraints["years"]
+        or constraints["period_hints"]
     ):
         score += 0.4
 
@@ -110,7 +118,9 @@ def _has_numeric_value(item: RetrieverResultItem) -> bool:
     return "numeric_value=" in content and "numeric_value=None" not in content
 
 
-def _year_status(item: RetrieverResultItem, requested_years: list[str] | None = None) -> str:
+def _year_status(
+    item: RetrieverResultItem, requested_years: list[str] | None = None
+) -> str:
     """Return matched/unknown/conflict.
 
     Unknown is neutral: if no requested year or no explicit candidate year is
@@ -178,10 +188,11 @@ def _evidence_bucket(
     row_hit = int(metadata.get("row_hit") or 0)
     section_hit = int(metadata.get("section_hit") or 0)
     metric_match = (
-        (source == "metrics_table" and (row_hit > 0 or bool(metadata.get("target_name"))))
-        or (source in {"table", "primary_statement_cell"} and bool(row_header))
+        source == "metrics_table" and (row_hit > 0 or bool(metadata.get("target_name")))
+    ) or (source in {"table", "primary_statement_cell"} and bool(row_header))
+    statement_match = (
+        source in {"primary_statement", "primary_statement_cell"} or section_hit > 0
     )
-    statement_match = source in {"primary_statement", "primary_statement_cell"} or section_hit > 0
     status = _year_status(item, requested_years)
 
     features = {
@@ -266,7 +277,9 @@ def _attach_fusion_scores(
             source_weight = {3: 1.6, 2: 1.3, 1: 1.0}.get(priority, 1.3)
         else:
             source_weight = 1.0
-        fused_score = source_weight * normalized_by_idx[idx] + bonus_weight * bonuses[idx]
+        fused_score = (
+            source_weight * normalized_by_idx[idx] + bonus_weight * bonuses[idx]
+        )
         fused_score = _safe_float(fused_score)
         metadata.update(
             {

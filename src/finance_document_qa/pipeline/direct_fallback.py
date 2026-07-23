@@ -35,11 +35,18 @@ _UNIT_WORD = {"thousand": "thousand", "million": "million", "billion": "billion"
 def _requested_unit(question: str) -> str | None:
     """Return the unit the question explicitly asks for, if any."""
     text = str(question or "").lower()
-    if re.search(r"\b(?:usd|us\$|dollars?|\$)\s*billions?\b|\bbillions?\s+of\s+dollars?\b", text):
+    if re.search(
+        r"\b(?:usd|us\$|dollars?|\$)\s*billions?\b|\bbillions?\s+of\s+dollars?\b", text
+    ):
         return "billion"
-    if re.search(r"\b(?:usd|us\$|dollars?|\$)\s*millions?\b|\bmillions?\s+of\s+dollars?\b", text):
+    if re.search(
+        r"\b(?:usd|us\$|dollars?|\$)\s*millions?\b|\bmillions?\s+of\s+dollars?\b", text
+    ):
         return "million"
-    if re.search(r"\b(?:usd|us\$|dollars?|\$)\s*thousands?\b|\bthousands?\s+of\s+dollars?\b", text):
+    if re.search(
+        r"\b(?:usd|us\$|dollars?|\$)\s*thousands?\b|\bthousands?\s+of\s+dollars?\b",
+        text,
+    ):
         return "thousand"
     return None
 
@@ -78,7 +85,11 @@ def _direct_table_cell_fallback(
     for ctx in (retrieved_contexts or [])[:max_evidence]:
         metadata = ctx.get("metadata") if isinstance(ctx, dict) else None
         metadata = metadata or {}
-        if metadata.get("source") not in {"table", "metrics_table", "primary_statement_cell"}:
+        if metadata.get("source") not in {
+            "table",
+            "metrics_table",
+            "primary_statement_cell",
+        }:
             continue
         if metadata.get("bucket") not in {"exact_cell", "metric_cell"}:
             continue

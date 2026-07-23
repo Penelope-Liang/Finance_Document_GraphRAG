@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from financebench_pipeline.utils import _normalize_text
+from finance_document_qa.pipeline.utils import _normalize_text
 
 
 _MONTH_ALIASES = {
@@ -177,7 +177,9 @@ def _extract_years(text: str) -> list[str]:
         if year:
             years.add(year)
 
-    for match in re.finditer(r"\bq[1-4]\s*(?:of\s*)?(?:fy\s*)?((?:19|20)\d{2})\b", clean):
+    for match in re.finditer(
+        r"\bq[1-4]\s*(?:of\s*)?(?:fy\s*)?((?:19|20)\d{2})\b", clean
+    ):
         year = _normalize_year_token(match.group(1))
         if year:
             years.add(year)
@@ -322,11 +324,15 @@ def _parse_json_object(raw: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _company_name_from_question(question: str | None, llm: Any | None = None) -> str | None:
+def _company_name_from_question(
+    question: str | None, llm: Any | None = None
+) -> str | None:
     if not question or llm is None:
         return None
     try:
-        raw = llm.invoke(_COMPANY_EXTRACTION_PROMPT.format(question=question)).content.strip()
+        raw = llm.invoke(
+            _COMPANY_EXTRACTION_PROMPT.format(question=question)
+        ).content.strip()
     except Exception:
         return None
     payload = _parse_json_object(raw)
@@ -401,14 +407,19 @@ def _company_doc_key_from_company_name(company: str | None) -> str | None:
     if not company_keys:
         return None
     for prefix, name in _DOC_PREFIX_TO_COMPANY_NAME.items():
-        registry_keys = _company_match_keys(name) | {_normalize_text(prefix).replace("_", "")}
+        registry_keys = _company_match_keys(name) | {
+            _normalize_text(prefix).replace("_", "")
+        }
         if company_keys & registry_keys:
             return prefix.lower()
     for prefix, name in _DOC_PREFIX_TO_COMPANY_NAME.items():
-        registry_keys = _company_match_keys(name) | {_normalize_text(prefix).replace("_", "")}
+        registry_keys = _company_match_keys(name) | {
+            _normalize_text(prefix).replace("_", "")
+        }
         for company_key in company_keys:
             if len(company_key) >= 3 and any(
-                registry_key.startswith(company_key) or company_key.startswith(registry_key)
+                registry_key.startswith(company_key)
+                or company_key.startswith(registry_key)
                 for registry_key in registry_keys
                 if len(registry_key) >= 3
             ):
@@ -437,7 +448,8 @@ def _doc_matches_month(doc_id: str, months: list[str]) -> bool:
         return True
     stem = Path(str(doc_id)).stem
     return any(
-        month in _MONTH_TO_NUMBER and re.search(rf"[-_]{_MONTH_TO_NUMBER[month]}[-_]\d{{2}}\b", stem)
+        month in _MONTH_TO_NUMBER
+        and re.search(rf"[-_]{_MONTH_TO_NUMBER[month]}[-_]\d{{2}}\b", stem)
         for month in months
     )
 
@@ -464,11 +476,16 @@ def _candidate_filing_doc_ids(
     base_candidates = [
         doc_id
         for doc_id in available_doc_ids
-        if (not company_doc_key or _doc_company_prefix(doc_id) == str(company_doc_key).lower())
+        if (
+            not company_doc_key
+            or _doc_company_prefix(doc_id) == str(company_doc_key).lower()
+        )
         and _doc_matches_year(doc_id, target_year)
         and _doc_matches_quarter(doc_id, quarters)
     ]
-    candidates = [doc_id for doc_id in base_candidates if _doc_matches_month(doc_id, months)]
+    candidates = [
+        doc_id for doc_id in base_candidates if _doc_matches_month(doc_id, months)
+    ]
     if months and not candidates:
         candidates = base_candidates
     if not candidates:

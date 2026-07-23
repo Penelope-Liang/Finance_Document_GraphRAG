@@ -291,31 +291,33 @@ def _infer_round_to(question: str, fallback: int = 2) -> int:
     return fallback
 
 
-_PLAIN_RATIO_KEYWORDS = frozenset({
-    "ratio",
-    "turnover",
-    "roa",
-    "roe",
-    "roi",
-    "eps",
-    "p/e",
-    "pe ratio",
-    "dpo",
-    "dso",
-    "dio",
-    "ccc",
-    "times interest",
-    "debt-to-equity",
-    "debt to equity",
-    "current ratio",
-    "quick ratio",
-    "working capital ratio",
-    "operating cash flow ratio",
-    "asset turnover",
-    "fixed asset turnover",
-    "inventory turnover",
-    "receivables turnover",
-})
+_PLAIN_RATIO_KEYWORDS = frozenset(
+    {
+        "ratio",
+        "turnover",
+        "roa",
+        "roe",
+        "roi",
+        "eps",
+        "p/e",
+        "pe ratio",
+        "dpo",
+        "dso",
+        "dio",
+        "ccc",
+        "times interest",
+        "debt-to-equity",
+        "debt to equity",
+        "current ratio",
+        "quick ratio",
+        "working capital ratio",
+        "operating cash flow ratio",
+        "asset turnover",
+        "fixed asset turnover",
+        "inventory turnover",
+        "receivables turnover",
+    }
+)
 
 
 def _explicit_percent_request(question: str) -> bool:
@@ -396,23 +398,32 @@ def _validate_formula_ast(node: ast.AST, *, allowed_names: set[str]) -> None:
             if child.id not in allowed_names and child.id not in _ALLOWED_FUNCTIONS:
                 raise ValueError(f"unknown variable/function: {child.id}")
         if isinstance(child, ast.Call):
-            if not isinstance(child.func, ast.Name) or child.func.id not in _ALLOWED_FUNCTIONS:
+            if (
+                not isinstance(child.func, ast.Name)
+                or child.func.id not in _ALLOWED_FUNCTIONS
+            ):
                 raise ValueError("only round/abs/min/max calls are allowed")
             if child.keywords:
                 raise ValueError("keyword arguments are not allowed")
         if isinstance(child, ast.Constant):
-            if isinstance(child.value, bool) or not isinstance(child.value, (int, float)):
+            if isinstance(child.value, bool) or not isinstance(
+                child.value, (int, float)
+            ):
                 raise ValueError("only numeric constants are allowed")
 
 
-def _derive_inputs_from_required(required_inputs: list[dict[str, Any]]) -> dict[str, float]:
+def _derive_inputs_from_required(
+    required_inputs: list[dict[str, Any]],
+) -> dict[str, float]:
     """Rebuild the executable variable map from per-input values the model already
     extracted, for when it forgot to fill the separate ``inputs`` object."""
     derived: dict[str, float] = {}
     for item in required_inputs:
         variable = item.get("variable")
         value = item.get("value")
-        if not isinstance(variable, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", variable):
+        if not isinstance(variable, str) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9_]*", variable
+        ):
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
@@ -425,8 +436,14 @@ def _missing_required_input_names(required_inputs: list[dict[str, Any]]) -> list
     names: list[str] = []
     for item in required_inputs:
         value = item.get("value")
-        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
-            names.append(str(item.get("name") or item.get("variable") or "unnamed input"))
+        if (
+            value is None
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            names.append(
+                str(item.get("name") or item.get("variable") or "unnamed input")
+            )
     return names
 
 
@@ -464,22 +481,34 @@ def _value_supported_by_source(value: float, source_text: Any) -> bool:
             continue
         if target == candidate:
             return True
-        shorter, longer = (target, candidate) if len(target) <= len(candidate) else (candidate, target)
+        shorter, longer = (
+            (target, candidate)
+            if len(target) <= len(candidate)
+            else (candidate, target)
+        )
         if len(shorter) >= 2 and longer.startswith(shorter):
             return True
     return False
 
 
-def _unsupported_required_input_names(required_inputs: list[dict[str, Any]]) -> list[str]:
+def _unsupported_required_input_names(
+    required_inputs: list[dict[str, Any]],
+) -> list[str]:
     """Inputs that carry a numeric value which does not appear in their own
     source_text quote (likely hallucinated)."""
     names: list[str] = []
     for item in required_inputs:
         value = item.get("value")
-        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        if (
+            value is None
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
             continue
         if not _value_supported_by_source(value, item.get("source_text")):
-            names.append(str(item.get("name") or item.get("variable") or "unnamed input"))
+            names.append(
+                str(item.get("name") or item.get("variable") or "unnamed input")
+            )
     return names
 
 
@@ -501,7 +530,9 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
         if missing_inputs:
             error_parts.append("missing required inputs: " + ", ".join(missing_inputs))
         if unsupported_inputs:
-            error_parts.append("inputs not found in source_text: " + ", ".join(unsupported_inputs))
+            error_parts.append(
+                "inputs not found in source_text: " + ", ".join(unsupported_inputs)
+            )
         return FormulaResult(
             success=False,
             answer=None,
@@ -563,7 +594,14 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
         unit = "percent"
     elif _is_plain_ratio_question(question):
         unit = "plain"
-    elif llm_unit in {"plain", "percent", "usd_millions", "usd_billions", "usd_thousands", "other"}:
+    elif llm_unit in {
+        "plain",
+        "percent",
+        "usd_millions",
+        "usd_billions",
+        "usd_thousands",
+        "other",
+    }:
         unit = llm_unit
     else:
         unit = unit_default
@@ -571,7 +609,9 @@ def evaluate_formula_plan(plan: dict[str, Any], *, question: str) -> FormulaResu
     parsed = ast.parse(formula, mode="eval")
     _validate_formula_ast(parsed, allowed_names=set(inputs))
     safe_globals = {"__builtins__": {}, **_ALLOWED_FUNCTIONS}
-    value = eval(compile(parsed, "<financebench_formula>", "eval"), safe_globals, dict(inputs))  # noqa: S307
+    value = eval(
+        compile(parsed, "<financebench_formula>", "eval"), safe_globals, dict(inputs)
+    )  # noqa: S307
 
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("formula result must be numeric")
@@ -603,7 +643,9 @@ def format_calculation_answer(result: FormulaResult) -> str | None:
     return text
 
 
-def generate_calculation_prompt(question: str, current_answer: Any, evidence: str) -> str:
+def generate_calculation_prompt(
+    question: str, current_answer: Any, evidence: str
+) -> str:
     return _CALCULATION_PLAN_PROMPT.format(
         question=question,
         current_answer=current_answer,
@@ -647,7 +689,9 @@ def _repair_missing_formula(
     """Focused second call: inputs are present but no executable formula was
     produced. Ask the model for the formula only, reusing the extracted values."""
     variables = "\n".join(f"{name} = {value}" for name, value in result.inputs.items())
-    repair_prompt = _FORMULA_REPAIR_PROMPT.format(question=question, variables=variables)
+    repair_prompt = _FORMULA_REPAIR_PROMPT.format(
+        question=question, variables=variables
+    )
     response = llm.invoke(repair_prompt)
     raw = response.content if hasattr(response, "content") else str(response)
     repair_json = _extract_json_object(raw or "")
@@ -708,8 +752,14 @@ def run_calculation_pipeline(
     # focused repair call rather than discarding an otherwise-complete extraction.
     if not result.success and result.error == "missing formula" and result.inputs:
         try:
-            repaired, repaired_answer = _repair_missing_formula(llm, question, plan, result)
-            if repaired is not None and repaired.success and repaired_answer is not None:
+            repaired, repaired_answer = _repair_missing_formula(
+                llm, question, plan, result
+            )
+            if (
+                repaired is not None
+                and repaired.success
+                and repaired_answer is not None
+            ):
                 result = repaired
                 answer = repaired_answer
         except Exception:

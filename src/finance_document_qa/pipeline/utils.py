@@ -43,12 +43,20 @@ def _load_questions(path: Path) -> list[dict]:
             if not raw:
                 continue
             row = json.loads(raw)
-            doc_name = row.get("doc_name") or str(row.get("doc_id") or "").removesuffix(".pdf")
+            doc_name = row.get("doc_name") or str(row.get("doc_id") or "").removesuffix(
+                ".pdf"
+            )
             row["doc_name"] = doc_name
-            row["doc_id"] = row.get("doc_id") or (f"{doc_name}.pdf" if doc_name else None)
-            row["question_id"] = row.get("question_id") or row.get("financebench_id") or row.get("id")
+            row["doc_id"] = row.get("doc_id") or (
+                f"{doc_name}.pdf" if doc_name else None
+            )
+            row["question_id"] = (
+                row.get("question_id") or row.get("financebench_id") or row.get("id")
+            )
             row["gold_answer"] = row.get("gold_answer") or row.get("answer")
-            row["gold_justification"] = row.get("gold_justification") or row.get("justification")
+            row["gold_justification"] = row.get("gold_justification") or row.get(
+                "justification"
+            )
             rows.append(row)
     return rows
 
@@ -117,7 +125,9 @@ def _save_results(output_path: Path, results: list[dict[str, Any]]) -> None:
 
 def _strip_think(text: str) -> str:
     """Remove reasoning traces emitted by local reasoning models."""
-    cleaned = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(
+        r"<think>.*?</think>", "", text or "", flags=re.DOTALL | re.IGNORECASE
+    )
     cleaned = re.sub(
         r"^\s*Thinking\.\.\..*?\.\.\.done thinking\.\s*",
         "",

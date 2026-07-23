@@ -6,9 +6,10 @@ The project focuses on evidence construction for financial reports. It parses PD
 
 ## Main Components
 
-- `scripts/main.py`: main QA runner for both RAG and GraphRAG experiments.
+- `scripts/run_document.py`: thin CLI entrypoint for RAG and GraphRAG experiments.
 - `scripts/evaluate_answer.py`: answer evaluator using RAGAS `faithfulness` and `answer_accuracy`.
-- `scripts/financebench_pipeline/`: FinanceBench-specific routing, prompts, and calculation executor.
+- `scripts/evaluate_retrieval.py`: retrieval evaluator using RAGAS retrieval metrics.
+- `src/finance_document_qa/`: FinanceBench-specific services, retrieval pipeline, prompts, and evaluation code.
 - `src/neo4j_graphrag/preprocess/`: PDF element processing, section-aware chunking, and table-cell extraction.
 - `src/neo4j_graphrag/tools/build_graph.py`: imports chunks into the Neo4j financial document graph.
 - `src/neo4j_graphrag/tools/import_tables.py`: imports structured table and table-cell nodes into Neo4j.
@@ -96,8 +97,8 @@ Do not commit real credentials.
 Run the text-only RAG baseline:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/main.py \
-  --questions-path scripts/financebench_metrics_remaining_37.jsonl \
+PYTHONPATH=src python -u scripts/run_document.py \
+  --questions-path dataset/financebench/financebench_metrics_remaining_37.jsonl \
   --retriever-mode hybrid \
   --question-style llm-auto \
   --use-query-rewrite \
@@ -109,8 +110,8 @@ PYTHONPATH=src:scripts python -u scripts/main.py \
 Run GraphRAG with dual retrieval:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/main.py \
-  --questions-path scripts/financebench_metrics_remaining_37.jsonl \
+PYTHONPATH=src python -u scripts/run_document.py \
+  --questions-path dataset/financebench/financebench_metrics_remaining_37.jsonl \
   --retriever-mode dual \
   --question-style llm-auto \
   --use-query-rewrite \
@@ -124,7 +125,7 @@ PYTHONPATH=src:scripts python -u scripts/main.py \
 Evaluate generated answers:
 
 ```bash
-PYTHONPATH=src:scripts python -u scripts/evaluate_answer.py \
+PYTHONPATH=src python -u scripts/evaluate_answer.py \
   --input output/graphrag_results.json \
   --output output/graphrag_results_answer_eval.json \
   --judge-model gpt-4.1-mini \

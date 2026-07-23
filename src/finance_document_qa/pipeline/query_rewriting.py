@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from financebench_pipeline.filing_constraints import (
+from finance_document_qa.pipeline.filing_constraints import (
     _company_doc_key_from_company_name,
     _company_name_from_doc_name,
     _company_name_from_question,
     _extract_year_window,
     _target_filing_year_from_question,
 )
-from financebench_pipeline.utils import _normalize_text
+from finance_document_qa.pipeline.utils import _normalize_text
 
 
 def _rewrite_metrics_query_for_retrieval(
@@ -58,11 +58,19 @@ def _rewrite_metrics_query_for_retrieval(
             add_component("total current liabilities")
             add_statement("consolidated statement of cash flows")
             add_statement("consolidated balance sheet")
-        if "capex" in clean or "capital expenditure" in clean or "capital expenditures" in clean:
+        if (
+            "capex" in clean
+            or "capital expenditure" in clean
+            or "capital expenditures" in clean
+        ):
             add_component("capital expenditures")
             add_component("capital expenditure")
             add_statement("consolidated statement of cash flows")
-        if "% of revenue" in clean or "percent of revenue" in clean or "percentage of revenue" in clean:
+        if (
+            "% of revenue" in clean
+            or "percent of revenue" in clean
+            or "percentage of revenue" in clean
+        ):
             operation = "divide_or_average"
             add_component("consolidated net revenues")
             add_component("total net revenues")
@@ -124,7 +132,11 @@ def _rewrite_metrics_query_for_retrieval(
             add_component("dividends")
             add_component("dividend distribution")
             add_component("cash dividends")
-        if "free cash" in clean or "cashflow conversion" in clean or "cash flow conversion" in clean:
+        if (
+            "free cash" in clean
+            or "cashflow conversion" in clean
+            or "cash flow conversion" in clean
+        ):
             add_component("free cash flow")
             add_component("net cash provided by operating activities")
             add_component("capital expenditures")
@@ -139,18 +151,42 @@ def _rewrite_metrics_query_for_retrieval(
             add_component("economic conditions")
             add_statement("risk factors")
             add_statement("business")
-        if "card member" in clean or "cardmember" in clean or "retain" in clean or "retention" in clean:
+        if (
+            "card member" in clean
+            or "cardmember" in clean
+            or "retain" in clean
+            or "retention" in clean
+        ):
             add_component("card members")
             add_component("retention")
             add_component("customer engagement")
         if question_style == "domain":
-            if any(token in clean for token in ("useful", "meaningful", "relevant", "not something", "not useful")):
+            if any(
+                token in clean
+                for token in (
+                    "useful",
+                    "meaningful",
+                    "relevant",
+                    "not something",
+                    "not useful",
+                )
+            ):
                 add_component("metric applicability")
                 add_component("business model")
                 add_component("industry context")
                 add_statement("business")
                 add_statement("management discussion")
-            if any(token in clean for token in ("drove", "driver", "driving", "due to", "primarily due", "change")):
+            if any(
+                token in clean
+                for token in (
+                    "drove",
+                    "driver",
+                    "driving",
+                    "due to",
+                    "primarily due",
+                    "change",
+                )
+            ):
                 add_component("drivers")
                 add_component("margin change")
                 add_component("operating margin")
@@ -164,7 +200,11 @@ def _rewrite_metrics_query_for_retrieval(
                 add_component("total current liabilities")
                 add_statement("consolidated balance sheet")
                 add_statement("liquidity")
-            if "capital-intensive" in clean or "capital intensive" in clean or "capex" in clean:
+            if (
+                "capital-intensive" in clean
+                or "capital intensive" in clean
+                or "capex" in clean
+            ):
                 add_component("capital expenditures")
                 add_component("property plant and equipment")
                 add_component("total assets")
@@ -196,7 +236,9 @@ def _rewrite_metrics_query_for_retrieval(
     return {
         "rewritten_query": rewritten_query or question,
         "company": company,
-        "company_source": "question" if company_from_question else ("doc_name" if company_from_doc else None),
+        "company_source": "question"
+        if company_from_question
+        else ("doc_name" if company_from_doc else None),
         "company_doc_key": _company_doc_key_from_company_name(company),
         "years": years,
         "target_filing_year": target_filing_year,
@@ -287,9 +329,7 @@ _METRICS_TABLE_TARGETS = {
         ),
     },
     "total_assets": {
-        "aliases": (
-            "total assets",
-        ),
+        "aliases": ("total assets",),
         "section_hints": (
             "balance sheet",
             "balance sheets",
@@ -436,11 +476,23 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
         add("ppne")
         add("total_assets")
         add("net_income")
-    if "capex" in clean or "capital expenditure" in clean or "capital expenditures" in clean:
+    if (
+        "capex" in clean
+        or "capital expenditure" in clean
+        or "capital expenditures" in clean
+    ):
         add("capex")
-    if "% of revenue" in clean or "percent of revenue" in clean or "percentage of revenue" in clean:
+    if (
+        "% of revenue" in clean
+        or "percent of revenue" in clean
+        or "percentage of revenue" in clean
+    ):
         add("revenue")
-    if "revenue growth" in clean or "change in revenue" in clean or "revenue cagr" in clean:
+    if (
+        "revenue growth" in clean
+        or "change in revenue" in clean
+        or "revenue cagr" in clean
+    ):
         add("revenue")
     if "operating income" in clean or "income from operations" in clean:
         add("operating_income")
@@ -491,8 +543,13 @@ def _metrics_component_targets(question: str, plan: dict[str, Any] | None) -> li
     # questions often mention only a business judgment in the raw question, while
     # the rewrite expands the financial inputs needed for that judgment.
     if plan:
-        component_text = _normalize_text(" ".join(str(c) for c in plan.get("components") or []))
-        if "operating margin" in component_text or "operating income margin" in component_text:
+        component_text = _normalize_text(
+            " ".join(str(c) for c in plan.get("components") or [])
+        )
+        if (
+            "operating margin" in component_text
+            or "operating income margin" in component_text
+        ):
             add("operating_income")
             add("revenue")
         if "gross margin" in component_text:

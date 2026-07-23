@@ -14,20 +14,28 @@ from neo4j_graphrag.retrievers import HybridCypherRetriever, Text2CypherRetrieve
 from neo4j_graphrag.retrievers.base import Retriever
 from neo4j_graphrag.types import RawSearchResult, RetrieverResult, RetrieverResultItem
 
-from financebench_pipeline.filing_constraints import _extract_question_constraints
-from financebench_pipeline.formatting import _format_chunk_record, _format_table_record
-from financebench_pipeline.fusion import (
+from finance_document_qa.pipeline.filing_constraints import (
+    _extract_question_constraints,
+)
+from finance_document_qa.pipeline.formatting import (
+    _format_chunk_record,
+    _format_table_record,
+)
+from finance_document_qa.pipeline.fusion import (
     _attach_fusion_scores,  # noqa: F401  # kept for commented-out soft-fusion fallback
     _evidence_bucket,
     _item_base_score,
 )
-from financebench_pipeline.query_rewriting import (
+from finance_document_qa.pipeline.query_rewriting import (
     _METRICS_TABLE_TARGETS,
     _metrics_component_targets,
 )
-from financebench_pipeline.question_routing import _detect_statement_type
-from financebench_pipeline.retrieval_queries import METRICS_TABLE_CELL_QUERY, PRIMARY_STATEMENT_QUERY
-from financebench_pipeline.utils import (
+from finance_document_qa.pipeline.question_routing import _detect_statement_type
+from finance_document_qa.pipeline.retrieval_queries import (
+    METRICS_TABLE_CELL_QUERY,
+    PRIMARY_STATEMENT_QUERY,
+)
+from finance_document_qa.pipeline.utils import (
     _extract_json_object,
     _safe_float,
     _sanitize_for_json,
@@ -117,8 +125,6 @@ def _build_reranker(model_name: str) -> Any:
             return CrossEncoder(model_name)
 
 
-
-
 class MetricsTableCellRetriever(Retriever):
     VERIFY_NEO4J_VERSION = False
 
@@ -134,7 +140,9 @@ class MetricsTableCellRetriever(Retriever):
         self.per_target_limit = per_target_limit
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
-        raise NotImplementedError("MetricsTableCellRetriever uses a custom search implementation.")
+        raise NotImplementedError(
+            "MetricsTableCellRetriever uses a custom search implementation."
+        )
 
     def search(
         self,
@@ -197,22 +205,24 @@ class MetricsTableCellRetriever(Retriever):
                 )
             )
 
-        return _sanitize_retriever_result(RetrieverResult(
-            items=items,
-            metadata={
-                "__retriever": "MetricsTableCellRetriever",
-                "matched": bool(items),
-                "doc_id": doc_id,
-                "doc_id_filter_applied": bool(doc_id),
-                "doc_ids": list(doc_ids or []),
-                "doc_ids_filter_applied": bool(doc_ids),
-                "company_doc_key": company_doc_key,
-                "company_filter_applied": bool(company_doc_key),
-                "years": list(years or []),
-                "target_names": target_names,
-                "kept": len(items),
-            },
-        ))
+        return _sanitize_retriever_result(
+            RetrieverResult(
+                items=items,
+                metadata={
+                    "__retriever": "MetricsTableCellRetriever",
+                    "matched": bool(items),
+                    "doc_id": doc_id,
+                    "doc_id_filter_applied": bool(doc_id),
+                    "doc_ids": list(doc_ids or []),
+                    "doc_ids_filter_applied": bool(doc_ids),
+                    "company_doc_key": company_doc_key,
+                    "company_filter_applied": bool(company_doc_key),
+                    "years": list(years or []),
+                    "target_names": target_names,
+                    "kept": len(items),
+                },
+            )
+        )
 
 
 class StyleRoutingText2CypherRetriever(Retriever):
@@ -235,9 +245,13 @@ class StyleRoutingText2CypherRetriever(Retriever):
         self._novel = retriever_novel or retriever_direct
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
-        raise NotImplementedError("StyleRoutingText2CypherRetriever delegates to inner retrievers.")
+        raise NotImplementedError(
+            "StyleRoutingText2CypherRetriever delegates to inner retrievers."
+        )
 
-    def search(self, query_text: str, t2c_style: str = "direct", **kwargs: Any) -> RetrieverResult:
+    def search(
+        self, query_text: str, t2c_style: str = "direct", **kwargs: Any
+    ) -> RetrieverResult:
         if t2c_style == "calculation":
             inner = self._calc
         elif t2c_style in {"novel", "domain"}:
@@ -247,7 +261,9 @@ class StyleRoutingText2CypherRetriever(Retriever):
         return _sanitize_retriever_result(inner.search(query_text=query_text))
 
 
-def _format_judge_candidate(index: int, item: RetrieverResultItem, max_chars: int = 1200) -> str:
+def _format_judge_candidate(
+    index: int, item: RetrieverResultItem, max_chars: int = 1200
+) -> str:
     metadata = item.metadata or {}
     section_name = str(metadata.get("section_name") or "")
     source = str(metadata.get("source") or "")
@@ -264,7 +280,9 @@ def _format_judge_candidate(index: int, item: RetrieverResultItem, max_chars: in
     )
 
 
-def _judge_prompt(query_text: str, items: list[RetrieverResultItem], max_chars: int) -> str:
+def _judge_prompt(
+    query_text: str, items: list[RetrieverResultItem], max_chars: int
+) -> str:
     constraints = _extract_question_constraints(query_text)
     candidates_text = "\n\n".join(
         _format_judge_candidate(i, item, max_chars=max_chars)
@@ -281,7 +299,11 @@ def _judge_prompt(query_text: str, items: list[RetrieverResultItem], max_chars: 
         hints.append(f"Months: {', '.join(constraints['months'])}")
     if constraints["period_hints"]:
         hints.append(f"Period hints: {', '.join(constraints['period_hints'])}")
-    hint_block = "\n".join(f"- {line}" for line in hints) if hints else "- No explicit structured hints extracted."
+    hint_block = (
+        "\n".join(f"- {line}" for line in hints)
+        if hints
+        else "- No explicit structured hints extracted."
+    )
     return f"""
 You are filtering retrieved evidence for a financial question.
 
@@ -322,26 +344,33 @@ class LLMJudgeRetriever(Retriever):
     ) -> None:
         super().__init__(
             driver=inner_retriever.driver,
-            neo4j_database=neo4j_database or getattr(inner_retriever, "neo4j_database", None),
+            neo4j_database=neo4j_database
+            or getattr(inner_retriever, "neo4j_database", None),
         )
         self.inner_retriever = inner_retriever
         self.llm = llm
         self.judge_max_chars = judge_max_chars
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
-        raise NotImplementedError("LLMJudgeRetriever wraps search(), not raw Neo4j records.")
+        raise NotImplementedError(
+            "LLMJudgeRetriever wraps search(), not raw Neo4j records."
+        )
 
     def search(self, *args: Any, **kwargs: Any) -> RetrieverResult:
-        result = _sanitize_retriever_result(self.inner_retriever.search(*args, **kwargs))
+        result = _sanitize_retriever_result(
+            self.inner_retriever.search(*args, **kwargs)
+        )
         if not result.items:
             return result
 
         query_text = kwargs.get("query_text") or (args[0] if args else "")
         if not query_text:
-            return _sanitize_retriever_result(RetrieverResult(
-                items=result.items,
-                metadata={**(result.metadata or {}), "llm_judge_applied": False},
-            ))
+            return _sanitize_retriever_result(
+                RetrieverResult(
+                    items=result.items,
+                    metadata={**(result.metadata or {}), "llm_judge_applied": False},
+                )
+            )
 
         prompt = _judge_prompt(query_text, result.items, self.judge_max_chars)
         try:
@@ -358,19 +387,23 @@ class LLMJudgeRetriever(Retriever):
             ]
             if not judged_items:
                 judged_items = result.items
-            return _sanitize_retriever_result(RetrieverResult(
-                items=judged_items,
-                metadata={
-                    **(result.metadata or {}),
-                    "llm_judge_applied": True,
-                    "llm_judge_kept": len(judged_items),
-                },
-            ))
+            return _sanitize_retriever_result(
+                RetrieverResult(
+                    items=judged_items,
+                    metadata={
+                        **(result.metadata or {}),
+                        "llm_judge_applied": True,
+                        "llm_judge_kept": len(judged_items),
+                    },
+                )
+            )
         except Exception:
-            return _sanitize_retriever_result(RetrieverResult(
-                items=result.items,
-                metadata={**(result.metadata or {}), "llm_judge_applied": False},
-            ))
+            return _sanitize_retriever_result(
+                RetrieverResult(
+                    items=result.items,
+                    metadata={**(result.metadata or {}), "llm_judge_applied": False},
+                )
+            )
 
 
 def _is_retryable_llm_error(exc: Exception) -> bool:
@@ -415,8 +448,6 @@ def _rag_search_with_retry(
                 time.sleep(retry_sleep * mult * attempt)
 
 
-
-
 class PrimaryStatementRetriever(Retriever):
     """Deterministically pulls primary financial statement chunks
     (balance sheet / income statement / cash flow / equity) by section_name
@@ -435,7 +466,9 @@ class PrimaryStatementRetriever(Retriever):
         self.limit = limit
 
     def get_search_results(self, *args: Any, **kwargs: Any) -> RawSearchResult:
-        raise NotImplementedError("PrimaryStatementRetriever uses a custom search implementation.")
+        raise NotImplementedError(
+            "PrimaryStatementRetriever uses a custom search implementation."
+        )
 
     def search(
         self,
@@ -444,8 +477,12 @@ class PrimaryStatementRetriever(Retriever):
     ) -> RetrieverResult:
         spec = _detect_statement_type(query_text)
         doc_id = (query_params or {}).get("doc_id") if query_params else None
-        doc_ids = list((query_params or {}).get("doc_ids") or []) if query_params else []
-        company_doc_key = (query_params or {}).get("company_doc_key") if query_params else None
+        doc_ids = (
+            list((query_params or {}).get("doc_ids") or []) if query_params else []
+        )
+        company_doc_key = (
+            (query_params or {}).get("company_doc_key") if query_params else None
+        )
 
         if spec is None:
             return RetrieverResult(
@@ -475,7 +512,9 @@ class PrimaryStatementRetriever(Retriever):
             metadata = dict(item.metadata or {})
             metadata["source"] = "primary_statement"
             metadata["statement_type"] = spec["name"]
-            metadata["chunk_statement_type"] = _sanitize_value(record.get("chunk_statement_type"))
+            metadata["chunk_statement_type"] = _sanitize_value(
+                record.get("chunk_statement_type")
+            )
             metadata["match_priority"] = int(record.get("match_priority") or 0)
             items.append(
                 _sanitize_retriever_item(
@@ -506,29 +545,35 @@ class PrimaryStatementRetriever(Retriever):
                 cell_metadata["chunk_statement_type"] = _sanitize_value(
                     record.get("chunk_statement_type")
                 )
-                cell_metadata["parent_section_name"] = _sanitize_value(record.get("section_name"))
+                cell_metadata["parent_section_name"] = _sanitize_value(
+                    record.get("section_name")
+                )
                 cell_metadata["match_priority"] = int(record.get("match_priority") or 0)
                 items.append(
                     _sanitize_retriever_item(
-                        RetrieverResultItem(content=cell_item.content, metadata=cell_metadata)
+                        RetrieverResultItem(
+                            content=cell_item.content, metadata=cell_metadata
+                        )
                     )
                 )
 
-        return _sanitize_retriever_result(RetrieverResult(
-            items=items,
-            metadata={
-                "__retriever": "PrimaryStatementRetriever",
-                "matched": True,
-                "statement_type": spec["name"],
-                "doc_id": doc_id,
-                "doc_id_filter_applied": bool(doc_id),
-                "doc_ids": doc_ids,
-                "doc_ids_filter_applied": bool(doc_ids),
-                "company_doc_key": company_doc_key,
-                "company_filter_applied": bool(company_doc_key),
-                "kept": len(items),
-            },
-        ))
+        return _sanitize_retriever_result(
+            RetrieverResult(
+                items=items,
+                metadata={
+                    "__retriever": "PrimaryStatementRetriever",
+                    "matched": True,
+                    "statement_type": spec["name"],
+                    "doc_id": doc_id,
+                    "doc_id_filter_applied": bool(doc_id),
+                    "doc_ids": doc_ids,
+                    "doc_ids_filter_applied": bool(doc_ids),
+                    "company_doc_key": company_doc_key,
+                    "company_filter_applied": bool(company_doc_key),
+                    "kept": len(items),
+                },
+            )
+        )
 
 
 class DualRetriever(Retriever):
@@ -576,7 +621,9 @@ class DualRetriever(Retriever):
         )
 
     @staticmethod
-    def _filter_result_doc_ids(result: RetrieverResult, doc_ids: list[str]) -> RetrieverResult:
+    def _filter_result_doc_ids(
+        result: RetrieverResult, doc_ids: list[str]
+    ) -> RetrieverResult:
         if not doc_ids:
             return result
         allowed = set(doc_ids)
@@ -607,7 +654,9 @@ class DualRetriever(Retriever):
         metrics_plan: dict[str, Any] | None = None,
     ) -> RetrieverResult:
         search_text = retrieval_query_text or query_text
-        target_doc_ids = list((query_params or {}).get("doc_ids") or []) if query_params else []
+        target_doc_ids = (
+            list((query_params or {}).get("doc_ids") or []) if query_params else []
+        )
         table_search_text = (
             f"{search_text}\nTarget filing doc_ids: {', '.join(target_doc_ids)}"
             if target_doc_ids
@@ -628,7 +677,10 @@ class DualRetriever(Retriever):
                 and metrics_plan is not None
                 else RetrieverResult(
                     items=[],
-                    metadata={"__retriever": "MetricsTableCellRetriever", "matched": False},
+                    metadata={
+                        "__retriever": "MetricsTableCellRetriever",
+                        "matched": False,
+                    },
                 )
             )
         except Exception as exc:
@@ -660,11 +712,16 @@ class DualRetriever(Retriever):
 
         try:
             primary_result = (
-                self.primary_retriever.search(query_text=search_text, query_params=query_params)
+                self.primary_retriever.search(
+                    query_text=search_text, query_params=query_params
+                )
                 if self.primary_retriever is not None
                 else RetrieverResult(
                     items=[],
-                    metadata={"__retriever": "PrimaryStatementRetriever", "matched": False},
+                    metadata={
+                        "__retriever": "PrimaryStatementRetriever",
+                        "matched": False,
+                    },
                 )
             )
         except Exception as exc:
@@ -676,7 +733,12 @@ class DualRetriever(Retriever):
 
         # Order matters: structured metric cells first, then primary statements,
         # so deterministic evidence wins ties on dedup before semantic retrieval.
-        for item in metrics_result.items + primary_result.items + table_result.items + chunk_result.items:
+        for item in (
+            metrics_result.items
+            + primary_result.items
+            + table_result.items
+            + chunk_result.items
+        ):
             content = str(item.content)
             if content in seen_contents:
                 continue
@@ -711,17 +773,20 @@ class DualRetriever(Retriever):
                 )
             )
 
-        def _soft_fusion_rank(items_to_rank: list[RetrieverResultItem]) -> list[RetrieverResultItem]:
-            fusion_question = query_text if search_text == query_text else f"{query_text}\n{search_text}"
+        def _soft_fusion_rank(
+            items_to_rank: list[RetrieverResultItem],
+        ) -> list[RetrieverResultItem]:
+            fusion_question = (
+                query_text
+                if search_text == query_text
+                else f"{query_text}\n{search_text}"
+            )
             fused_items = _attach_fusion_scores(fusion_question, items_to_rank)
             fused_items.sort(
                 key=lambda item: _safe_float((item.metadata or {}).get("fused_score")),
                 reverse=True,
             )
-            return [
-                _sanitize_retriever_item(item)
-                for item in fused_items
-            ]
+            return [_sanitize_retriever_item(item) for item in fused_items]
 
         ranking_metadata: dict[str, Any] = {
             "strategy": "cross_encoder_reranker",
@@ -745,7 +810,9 @@ class DualRetriever(Retriever):
                     scores = scores.tolist()
 
                 reranked: list[tuple[float, int, RetrieverResultItem]] = []
-                for index, (score, item) in enumerate(zip(scores, annotated_items, strict=True)):
+                for index, (score, item) in enumerate(
+                    zip(scores, annotated_items, strict=True)
+                ):
                     metadata = dict(item.metadata or {})
                     metadata["reranker_score"] = float(score)
                     reranked.append(
@@ -753,7 +820,9 @@ class DualRetriever(Retriever):
                             float(score),
                             index,
                             _sanitize_retriever_item(
-                                RetrieverResultItem(content=item.content, metadata=metadata)
+                                RetrieverResultItem(
+                                    content=item.content, metadata=metadata
+                                )
                             ),
                         )
                     )
@@ -771,15 +840,17 @@ class DualRetriever(Retriever):
             ranking_metadata["reranked"] = False
             ranking_metadata["fallback"] = None
 
-        return _sanitize_retriever_result(RetrieverResult(
-            items=items,
-            metadata={
-                "__retriever": "DualRetriever",
-                "metrics_retriever": metrics_result.metadata,
-                "chunk_retriever": chunk_result.metadata,
-                "table_retriever": table_result.metadata,
-                "primary_retriever": primary_result.metadata,
-                "retrieval_query_text": search_text,
-                "ranking": ranking_metadata,
-            },
-        ))
+        return _sanitize_retriever_result(
+            RetrieverResult(
+                items=items,
+                metadata={
+                    "__retriever": "DualRetriever",
+                    "metrics_retriever": metrics_result.metadata,
+                    "chunk_retriever": chunk_result.metadata,
+                    "table_retriever": table_result.metadata,
+                    "primary_retriever": primary_result.metadata,
+                    "retrieval_query_text": search_text,
+                    "ranking": ranking_metadata,
+                },
+            )
+        )

@@ -5,7 +5,7 @@ from typing import Any
 import neo4j
 from neo4j_graphrag.types import RetrieverResultItem
 
-from financebench_pipeline.utils import _sanitize_for_json, _sanitize_value
+from finance_document_qa.pipeline.utils import _sanitize_for_json, _sanitize_value
 
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
@@ -37,12 +37,14 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
         lines.append(str(record))
     return RetrieverResultItem(
         content="\n".join(lines),
-        metadata=_sanitize_for_json({
-            "doc_id": doc_id or None,
-            "section_name": section_name or None,
-            "similarity_score": record.get("similarity_score"),
-            "source": "chunk",
-        }),
+        metadata=_sanitize_for_json(
+            {
+                "doc_id": doc_id or None,
+                "section_name": section_name or None,
+                "similarity_score": record.get("similarity_score"),
+                "source": "chunk",
+            }
+        ),
     )
 
 
@@ -62,17 +64,19 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
     )
     return RetrieverResultItem(
         content=content,
-        metadata=_sanitize_for_json({
-            "doc_id": doc_id,
-            "section_name": section_name or None,
-            "row_header": row_header,
-            "col_header": col_header,
-            "text": text,
-            "numeric_value": numeric_value,
-            "numeric_kind": numeric_kind,
-            "scale": scale,
-            "source": "table",
-        }),
+        metadata=_sanitize_for_json(
+            {
+                "doc_id": doc_id,
+                "section_name": section_name or None,
+                "row_header": row_header,
+                "col_header": col_header,
+                "text": text,
+                "numeric_value": numeric_value,
+                "numeric_kind": numeric_kind,
+                "scale": scale,
+                "source": "table",
+            }
+        ),
     )
 
 

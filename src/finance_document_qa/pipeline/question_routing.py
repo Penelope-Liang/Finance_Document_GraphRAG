@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Callable
 
-from financebench_pipeline.utils import _normalize_text
+from finance_document_qa.pipeline.utils import _normalize_text
 
 
 ROUTER_PROMPT = """You are routing FinanceBench questions into exactly one QA pipeline.
@@ -71,9 +71,25 @@ def classify_question_style_auto(question: str) -> tuple[str, float, str]:
         domain_hit("drivers")
     if re.search(r"\bwhy\b", q) or "due to" in q or "primarily due" in q:
         domain_hit("causal_explanation")
-    if any(phrase in q for phrase in ("useful metric", "meaningful metric", "relevant metric", "not a useful metric")):
+    if any(
+        phrase in q
+        for phrase in (
+            "useful metric",
+            "meaningful metric",
+            "relevant metric",
+            "not a useful metric",
+        )
+    ):
         domain_hit("metric_applicability")
-    if any(phrase in q for phrase in ("business based on", "financial health", "liquidity profile", "margin profile")):
+    if any(
+        phrase in q
+        for phrase in (
+            "business based on",
+            "financial health",
+            "liquidity profile",
+            "margin profile",
+        )
+    ):
         domain_hit("business_judgment")
 
     if domain_hits:
@@ -156,7 +172,12 @@ def classify_question_style_llm(
     effective_style = map_router_label_to_question_style(label)
     if effective_style is None:
         fallback_style, fallback_conf, fallback_reason = fallback(question)
-        return fallback_style, fallback_conf, f"llm_parse_failed; fallback={fallback_reason}", raw
+        return (
+            fallback_style,
+            fallback_conf,
+            f"llm_parse_failed; fallback={fallback_reason}",
+            raw,
+        )
 
     return effective_style, 1.0, f"llm_router={label}; {reason or 'no_reason'}", raw
 

@@ -112,15 +112,23 @@ def extract_question_constraints(question: str) -> dict[str, Any]:
 
 def _append_constraint_lines(lines: list[str], constraints: dict[str, Any]) -> str:
     if constraints["section_hints"]:
-        lines.append(f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}")
+        lines.append(
+            f"- Extracted section/table hints: {', '.join(constraints['section_hints'])}"
+        )
     if constraints["years"]:
         lines.append(f"- Extracted years: {', '.join(constraints['years'])}")
     if constraints["quarters"]:
-        lines.append(f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}")
+        lines.append(
+            f"- Extracted quarters: {', '.join('Q' + q for q in constraints['quarters'])}"
+        )
     if constraints["months"]:
-        lines.append(f"- Extracted month-level temporal cues: {', '.join(constraints['months'])}")
+        lines.append(
+            f"- Extracted month-level temporal cues: {', '.join(constraints['months'])}"
+        )
     if constraints["period_hints"]:
-        lines.append(f"- Extracted period hints: {', '.join(constraints['period_hints'])}")
+        lines.append(
+            f"- Extracted period hints: {', '.join(constraints['period_hints'])}"
+        )
     return "\n".join(lines)
 
 

@@ -2,24 +2,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from financebench_pipeline.filing_constraints import _candidate_filing_doc_ids
+from finance_document_qa.pipeline.filing_constraints import (
+    _candidate_filing_doc_ids,
+)
 
 
-def _build_retrieval_filter(
+def build_retrieval_filter(
     *,
     row: dict[str, Any],
     query_rewrite_plan: dict[str, Any],
     use_query_rewrite: bool,
-    restrict_doc_id: bool,
+    use_gold_doc_id: bool,
     available_doc_ids: list[str],
 ) -> dict[str, Any]:
     """Shared document/company constraints for every retrieval branch."""
-    if restrict_doc_id:
+    if use_gold_doc_id:
+        gold_doc_id = str(row.get("doc_id") or "").strip()
+        if not gold_doc_id:
+            raise ValueError("use_gold_doc_id=True requires dataset doc_id.")
         return {
-            "doc_id": str(row["doc_id"]),
-            "doc_ids": [str(row["doc_id"])],
+            "doc_id": gold_doc_id,
+            "doc_ids": [gold_doc_id],
             "company_doc_key": None,
-            "doc_id_source": "dataset_doc_id",
+            "doc_id_source": "gold_doc_id",
         }
 
     candidate_doc_ids, company_doc_key, doc_id_source = _candidate_filing_doc_ids(
@@ -39,7 +44,9 @@ def _build_retrieval_filter(
         "doc_id": None,
         "doc_ids": [],
         "company_doc_key": (
-            company_doc_key or query_rewrite_plan.get("company_doc_key") if use_query_rewrite else None
+            company_doc_key or query_rewrite_plan.get("company_doc_key")
+            if use_query_rewrite
+            else None
         ),
         "doc_id_source": None,
     }

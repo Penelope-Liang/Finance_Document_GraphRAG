@@ -446,4 +446,3 @@ Question:
 
 Cypher query:
 """
-
