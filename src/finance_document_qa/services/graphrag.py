@@ -45,7 +45,7 @@ class FinanceDocumentGraphRAGService(BaseFinanceDocumentService):
             primary_retriever=primary_retriever,
             metrics_retriever=metrics_retriever,
             neo4j_database=self.config.neo4j_database,
-            reranker_model=self.reranker_model,
+            reranker_model=self.reranker_model if self.use_reranker else None,
         )
 
 

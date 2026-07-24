@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import neo4j
+from neo4j import NotificationMinimumSeverity
 from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.llm import AzureOpenAILLM, OllamaLLM
 from neo4j_graphrag.rag import GraphRAG
@@ -125,6 +126,7 @@ class BaseFinanceDocumentService:
         self.driver = driver or neo4j.GraphDatabase.driver(
             self.config.neo4j_uri,
             auth=(self.config.neo4j_user, _require_env("NEO4J_PASSWORD")),
+            notifications_min_severity=NotificationMinimumSeverity.OFF,
         )
 
         self.llm = self._build_answer_llm()

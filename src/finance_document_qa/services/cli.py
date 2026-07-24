@@ -91,8 +91,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--use-reranker",
         action="store_true",
         help=(
-            "Wrap hybrid/text2cypher retrieval with the existing CrossEncoder reranker. "
-            "Dual retrieval uses --reranker-model internally."
+            "Enable the CrossEncoder reranker for hybrid/text2cypher retrieval "
+            "and dual-mode evidence fusion."
         ),
     )
     parser.add_argument(
