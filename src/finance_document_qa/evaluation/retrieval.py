@@ -3,7 +3,6 @@ import asyncio
 import json
 import math
 import os
-import warnings
 from pathlib import Path
 
 from finance_document_qa.evaluation.ragas_components import build_ragas_azure_components
@@ -45,31 +44,6 @@ def get_retrieved_contexts(row, max_contexts, max_context_chars):
     return output
 
 
-def evidence_text(value):
-    if value is None:
-        return []
-    if isinstance(value, str):
-        text = value.strip()
-        return [text] if text else []
-    if isinstance(value, list):
-        output = []
-        for item in value:
-            output.extend(evidence_text(item))
-        return output
-    if isinstance(value, dict):
-        for key in ("evidence_text", "text", "content", "evidence", "gold_evidence"):
-            texts = evidence_text(value.get(key))
-            if texts:
-                return texts
-        return []
-    text = str(value).strip()
-    return [text] if text else []
-
-
-def get_reference_contexts(row):
-    return evidence_text(row.get("gold_evidence"))
-
-
 def clean_score(value):
     if value is None:
         return None
@@ -85,7 +59,7 @@ def clean_score(value):
     return number
 
 
-async def score_llm_context_recall(scorer, question, gold_answer, retrieved):
+async def score_context_recall(scorer, question, gold_answer, retrieved):
     return await scorer.ascore(
         user_input=question,
         reference=gold_answer,
@@ -93,7 +67,7 @@ async def score_llm_context_recall(scorer, question, gold_answer, retrieved):
     )
 
 
-async def score_llm_context_precision(scorer, question, gold_answer, retrieved):
+async def score_context_precision(scorer, question, gold_answer, retrieved):
     return await scorer.ascore(
         user_input=question,
         reference=gold_answer,
@@ -108,26 +82,6 @@ async def score_context_relevance(scorer, question, retrieved):
     )
 
 
-async def score_nonllm_context_recall(scorer, retrieved, reference_contexts):
-    from ragas.dataset_schema import SingleTurnSample
-
-    sample = SingleTurnSample(
-        retrieved_contexts=retrieved,
-        reference_contexts=reference_contexts,
-    )
-    return await scorer.single_turn_ascore(sample)
-
-
-async def score_nonllm_context_precision(scorer, retrieved, reference_contexts):
-    from ragas.dataset_schema import SingleTurnSample
-
-    sample = SingleTurnSample(
-        retrieved_contexts=retrieved,
-        reference_contexts=reference_contexts,
-    )
-    return await scorer.single_turn_ascore(sample)
-
-
 async def evaluate_samples(samples, judge_model, temperature):
     try:
         from ragas.metrics.collections import (
@@ -135,35 +89,24 @@ async def evaluate_samples(samples, judge_model, temperature):
             ContextRecall,
             ContextRelevance,
         )
-
-        # NonLLMContextRecall only lives in the legacy namespace; silence its
-        # deprecation warning. It is non-LLM (string distance) and needs no LLM.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            from ragas.metrics import (
-                NonLLMContextPrecisionWithReference,
-                NonLLMContextRecall,
-            )
     except ImportError as exc:
         raise ImportError("Retrieval evaluation requires ragas.") from exc
 
     llm = build_ragas_azure_components(judge_model, temperature=temperature)
-    llm_recall_scorer = ContextRecall(llm=llm)
-    llm_precision_scorer = ContextPrecision(llm=llm)
+    context_recall_scorer = ContextRecall(llm=llm)
+    context_precision_scorer = ContextPrecision(llm=llm)
     context_relevance_scorer = ContextRelevance(llm=llm)
-    nonllm_recall_scorer = NonLLMContextRecall()
-    nonllm_precision_scorer = NonLLMContextPrecisionWithReference()
 
     results = []
     for sample in samples:
-        llm_score = await score_llm_context_recall(
-            llm_recall_scorer,
+        context_recall_score = await score_context_recall(
+            context_recall_scorer,
             question=sample["question"],
             gold_answer=sample["gold_answer"],
             retrieved=sample["retrieved_contexts"],
         )
-        llm_precision_score = await score_llm_context_precision(
-            llm_precision_scorer,
+        context_precision_score = await score_context_precision(
+            context_precision_scorer,
             question=sample["question"],
             gold_answer=sample["gold_answer"],
             retrieved=sample["retrieved_contexts"],
@@ -173,26 +116,11 @@ async def evaluate_samples(samples, judge_model, temperature):
             question=sample["question"],
             retrieved=sample["retrieved_contexts"],
         )
-        nonllm_recall_score = None
-        nonllm_precision_score = None
-        if sample["reference_contexts"]:
-            nonllm_recall_score = await score_nonllm_context_recall(
-                nonllm_recall_scorer,
-                retrieved=sample["retrieved_contexts"],
-                reference_contexts=sample["reference_contexts"],
-            )
-            nonllm_precision_score = await score_nonllm_context_precision(
-                nonllm_precision_scorer,
-                retrieved=sample["retrieved_contexts"],
-                reference_contexts=sample["reference_contexts"],
-            )
         results.append(
             {
-                "llm_context_recall": clean_score(llm_score),
-                "llm_context_precision": clean_score(llm_precision_score),
+                "context_recall": clean_score(context_recall_score),
+                "context_precision": clean_score(context_precision_score),
                 "context_relevance": clean_score(context_relevance_score),
-                "nonllm_context_recall": clean_score(nonllm_recall_score),
-                "nonllm_context_precision": clean_score(nonllm_precision_score),
             }
         )
     return results
@@ -222,19 +150,15 @@ def summary(rows):
     ]
     return {
         "evaluated": len(evaluations),
-        "mean_llm_context_recall": mean_metric(evaluations, "llm_context_recall"),
-        "mean_llm_context_precision": mean_metric(evaluations, "llm_context_precision"),
+        "mean_context_recall": mean_metric(evaluations, "context_recall"),
+        "mean_context_precision": mean_metric(evaluations, "context_precision"),
         "mean_context_relevance": mean_metric(evaluations, "context_relevance"),
-        "mean_nonllm_context_recall": mean_metric(evaluations, "nonllm_context_recall"),
-        "mean_nonllm_context_precision": mean_metric(
-            evaluations, "nonllm_context_precision"
-        ),
     }
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate retrieval context recall and precision with LLM and non-LLM RAGAS metrics."
+        description="Evaluate retrieval context recall, precision, and relevance with RAGAS metrics."
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -272,22 +196,15 @@ def main():
             max_contexts=args.max_contexts,
             max_context_chars=args.max_context_chars,
         )
-        reference_contexts = get_reference_contexts(row)
-
         row["retrieval_evaluation"] = {
-            "llm_context_recall": None,
-            "llm_context_precision": None,
+            "context_recall": None,
+            "context_precision": None,
             "context_relevance": None,
-            "nonllm_context_recall": None,
-            "nonllm_context_precision": None,
-            "llm_recall_metric": "ContextRecall",
-            "llm_precision_metric": "ContextPrecision",
+            "context_recall_metric": "ContextRecall",
+            "context_precision_metric": "ContextPrecision",
             "context_relevance_metric": "ContextRelevance",
-            "nonllm_recall_metric": "NonLLMContextRecall",
-            "nonllm_precision_metric": "NonLLMContextPrecisionWithReference",
             "judge_model": args.judge_model,
             "retrieved_contexts_used": len(retrieved),
-            "reference_contexts_used": len(reference_contexts),
         }
 
         notes = []
@@ -297,10 +214,6 @@ def main():
             notes.append("gold_answer is missing")
         if not retrieved:
             notes.append("retrieved_contexts is missing")
-        if not reference_contexts:
-            row["retrieval_evaluation"]["nonllm_note"] = (
-                "gold_evidence is missing; non-LLM metrics skipped"
-            )
         if notes:
             row["retrieval_evaluation"]["note"] = "; ".join(notes)
             continue
@@ -311,7 +224,6 @@ def main():
                 "question": question,
                 "gold_answer": gold_answer,
                 "retrieved_contexts": retrieved,
-                "reference_contexts": reference_contexts,
             }
         )
 
