@@ -9,11 +9,11 @@ jobs:
       version: ${{ steps.get-version.outputs.version }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GIT_PUSH_PAT }}
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
@@ -31,7 +31,11 @@ jobs:
           echo Version: ${{ steps.get-version.outputs.version }}
       - name: Update CHANGELOG.md (cross platform supported)
         run: |
-          sed -i.bak -e 's/## Next/## Next\n\n## ${{ steps.get-version.outputs.version }}/' CHANGELOG.md && rm CHANGELOG.md.bak
+          if [ -f CHANGELOG.md ]; then
+            sed -i.bak -e 's/## Next/## Next\n\n## ${{ steps.get-version.outputs.version }}/' CHANGELOG.md && rm CHANGELOG.md.bak
+          else
+            echo "No CHANGELOG.md found; skipping changelog update."
+          fi
       - uses: EndBug/add-and-commit@v9
         with:
           author_name: 'Neo4j-GraphRAG GitHub Action'

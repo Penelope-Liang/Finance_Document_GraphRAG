@@ -14,7 +14,6 @@
 #  limitations under the License.
 from __future__ import annotations
 
-import warnings
 from typing import Any, Optional, Union
 
 from neo4j_graphrag.exceptions import InvalidHybridSearchRankerError
