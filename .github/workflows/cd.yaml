@@ -1,0 +1,140 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.ENABLE_AZURE_CD == 'true' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP }}
+      IMAGE_REPOSITORY: finance-document-qa
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          persist-credentials: false
+
+      - name: Check configuration and current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          for key in AZURE_RESOURCE_GROUP AZURE_ACR_NAME AZURE_CONTAINER_APP AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::Missing deployment configuration: $key"
+              exit 1
+            fi
+          done
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          [[ "$latest" == "$DEPLOY_SHA" ]] || { echo 'Refusing to deploy an outdated commit'; exit 1; }
+
+      # Also gates manual runs; no cloud credentials are passed to tests.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v3
+      - name: Check application
+        run: |
+          uv sync --frozen --extra app --extra ollama --extra openai --group dev
+          uv run ruff check src scripts tests
+          uv run pytest tests -q
+
+      - name: Build and check container
+        run: |
+          set -euo pipefail
+          docker build --tag finance-document-qa:build .
+          docker run --rm finance-document-qa:build /app/.venv/bin/python -c 'import openai, ollama'
+          docker run --detach --name qa-health --publish 127.0.0.1:18000:8000 \
+            --env APP_PROFILE=cloud --env LLM_BACKEND=azure-openai \
+            --env RETRIEVER_MODE=auto --env USE_RERANKER=false finance-document-qa:build
+          trap 'docker logs qa-health; docker rm --force qa-health' EXIT
+          curl --fail --silent --show-error --retry 12 --retry-connrefused \
+            --retry-delay 2 --max-time 5 http://127.0.0.1:18000/health | \
+            jq -e '.status == "ok" and .profile == "cloud" and .retriever_mode == "auto"'
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v2.4.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push image and update existing application
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          az extension add --name containerapp --upgrade --only-show-errors
+          mode=$(az containerapp show --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.activeRevisionsMode -o tsv)
+          [[ "$mode" == 'Single' ]] || { echo 'Configure single-revision mode before enabling CD'; exit 1; }
+          registry=$(az acr show --name "$AZURE_ACR_NAME" --query loginServer -o tsv)
+          image="$registry/$IMAGE_REPOSITORY:$DEPLOY_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          az acr login --name "$AZURE_ACR_NAME"
+          docker tag finance-document-qa:build "$image"
+          docker push "$image"
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          [[ "$latest" == "$DEPLOY_SHA" ]] || { echo 'Main changed during build; newer run will deploy'; exit 1; }
+          previous_image=$(az containerapp show --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" --query 'properties.template.containers[0].image' -o tsv)
+          echo "Previous image: $previous_image" >> "$GITHUB_STEP_SUMMARY"
+          revision=$(az containerapp update --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" --image "$image" \
+            --revision-suffix "gh-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --set-env-vars APP_PROFILE=cloud LLM_BACKEND=azure-openai RETRIEVER_MODE=auto USE_RERANKER=false \
+            --query properties.latestRevisionName -o tsv)
+          echo "DEPLOY_REVISION=$revision" >> "$GITHUB_ENV"
+          echo "Image: $image" >> "$GITHUB_STEP_SUMMARY"
+          echo "Revision: $revision" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for revision and check health
+        run: |
+          set -euo pipefail
+          ready=''
+          for attempt in {1..30}; do
+            ready=$(az containerapp show --name "$AZURE_CONTAINER_APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestReadyRevisionName -o tsv)
+            [[ -n "$DEPLOY_REVISION" && "$ready" == "$DEPLOY_REVISION" ]] && break
+            sleep 10
+          done
+          [[ -n "$DEPLOY_REVISION" && "$ready" == "$DEPLOY_REVISION" ]] || { echo 'New revision did not become ready'; exit 1; }
+          fqdn=$(az containerapp show --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          [[ -n "$fqdn" ]] || { echo 'Application ingress has no hostname'; exit 1; }
+          curl --fail --silent --show-error --retry 8 --retry-all-errors \
+            --retry-delay 5 --max-time 15 "https://$fqdn/health" | \
+            jq -e '.status == "ok" and .profile == "cloud" and .retriever_mode == "auto"'
+          echo "URL: https://$fqdn" >> "$GITHUB_STEP_SUMMARY"

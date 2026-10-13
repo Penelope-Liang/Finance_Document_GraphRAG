@@ -8,10 +8,11 @@ ENV PYTHONUNBUFFERED=1 \
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock README.md ./
+COPY LICENSE*.txt NOTICE.txt ./
 COPY src ./src
 COPY scripts/run_api.py ./scripts/run_api.py
 
-RUN uv sync --frozen --extra app --no-dev
+RUN uv sync --frozen --extra app --extra openai --extra ollama --no-dev
 
 EXPOSE 8000
 

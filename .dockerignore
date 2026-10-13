@@ -1,5 +1,6 @@
 .git
 .venv
+.venv-docling
 .uv-cache
 .mypy_cache
 .pytest_cache
@@ -8,6 +9,7 @@ __pycache__
 *.pyc
 
 .env
+.env.*
 output
 dataset
 dist

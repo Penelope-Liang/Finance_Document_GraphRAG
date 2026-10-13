@@ -101,7 +101,7 @@ Responses include the answer, retrieved evidence, and source metadata.
 
 - [PDF ingestion](docs/ingestion.md) — parsing, graph import, embeddings, and JSON replay.
 - [Batch queries and evaluation](docs/usage.md) — retrieval options and FinanceBench evaluation.
-- [Azure deployment](docs/azure_container_apps.md) — cloud configuration and deployment.
+- [Azure deployment](docs/azure_container_apps.md) — automatic deployment with GitHub Actions and Azure setup.
 - [Troubleshooting](docs/runbook.md) — connection, configuration, and runtime issues.
 
 ## License
