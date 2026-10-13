@@ -4,7 +4,7 @@ from __future__ import annotations
 FINANCIAL_GRAPH_SCHEMA = """
 Nodes:
 - Chunk {chunk_id, doc_id, section_name, text, chunk_index, parser_engine, chunk_engine}
-- Table {table_id, chunk_id, doc_id, section_name}
+- Table {table_id, chunk_id, doc_id, section_name, title, title_source, title_source_refs, table_context_json}
 - TableCell {cell_id, chunk_id, doc_id, section_name, row_header, col_header, text, numeric_value, numeric_kind, scale, normalized_value}
 
 Relationships:
@@ -13,6 +13,9 @@ Relationships:
 
 Important data conventions:
 - Financial statement answers often live on TableCell nodes.
+- A Table title is optional and distinct from section_name. Get cell titles from the parent (t:Table) via HAS_CELL; return t.title AS table_title, t.title_source AS table_title_source, t.title_source_refs AS table_title_source_refs, and t.table_context_json AS table_context_json when returning cell evidence. Do not exclude tables with missing titles.
+- Chunk, Table and TableCell have optional pages (integer array), source_refs (string array), provenance_json (JSON string), section_paths_json (JSON string), provenance_scope (cell or table), pipeline_version, artifact_id and source_sha256 properties. Old data can have null values.
+- When returning cell evidence also return ch.doc_id AS doc_id, cell.pages AS pages, cell.source_refs AS source_refs, cell.provenance_json AS provenance_json, cell.provenance_scope AS provenance_scope, cell.section_paths_json AS section_paths_json, cell.pipeline_version AS pipeline_version, cell.artifact_id AS artifact_id, cell.source_sha256 AS source_sha256. Do not filter out evidence with missing source properties.
 - Use doc_id to restrict to the target filing, e.g. "3M_2018_10K.pdf" or "AMAZON_2019_10K.pdf".
 - Prefer primary statement sections over notes when ranking evidence:
   - balance sheet

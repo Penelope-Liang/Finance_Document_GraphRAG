@@ -1,0 +1,20 @@
+name: App CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen --extra app --group dev
+      - run: uv run ruff check src/finance_document_qa/api scripts/run_api.py tests/api
+      - run: uv run pytest tests/api

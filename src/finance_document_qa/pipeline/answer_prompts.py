@@ -1,113 +1,10 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
-
-_MONTH_ALIASES = {
-    "january": ("january", "jan"),
-    "february": ("february", "feb"),
-    "march": ("march", "mar"),
-    "april": ("april", "apr"),
-    "may": ("may",),
-    "june": ("june", "jun"),
-    "july": ("july", "jul"),
-    "august": ("august", "aug"),
-    "september": ("september", "sept", "sep"),
-    "october": ("october", "oct"),
-    "november": ("november", "nov"),
-    "december": ("december", "dec"),
-}
-
-
-def normalize_text(text: str) -> str:
-    return " ".join((text or "").strip().lower().split())
-
-
-def extract_years(text: str) -> list[str]:
-    clean = normalize_text(text)
-    years = set(re.findall(r"\b(?:fy\s*)?((?:19|20)\d{2})\b", clean))
-    for short_year in re.findall(r"\bfy\s*['’]?(\d{2})\b", clean):
-        year_int = int(short_year)
-        if year_int <= 69:
-            years.add(f"20{year_int:02d}")
-        else:
-            years.add(f"19{year_int:02d}")
-    return sorted(years)
-
-
-def extract_months(text: str) -> list[str]:
-    """Extract month-level temporal cues only; calendar days are ignored."""
-    clean = normalize_text(text)
-    month_hits = []
-    for month, aliases in _MONTH_ALIASES.items():
-        if any(re.search(rf"\b{re.escape(alias)}\b", clean) for alias in aliases):
-            month_hits.append(month)
-    return month_hits
-
-
-def extract_question_constraints(question: str) -> dict[str, Any]:
-    clean = normalize_text(question)
-
-    years = extract_years(question)
-    quarter_match = re.findall(r"\bq([1-4])\b", clean)
-    month_hits = extract_months(question)
-    period_hints = [
-        hint
-        for hint in (
-            "year end",
-            "year ended",
-            "three months ended",
-            "six months ended",
-            "nine months ended",
-            "quarter ended",
-            "quarters ended",
-            "as of",
-        )
-        if hint in clean
-    ]
-
-    explicit_section_hints = [
-        phrase
-        for phrase in (
-            "income statement",
-            "statement of income",
-            "statements of income",
-            "statement of operations",
-            "statements of operations",
-            "statement of earnings",
-            "statements of earnings",
-            "balance sheet",
-            "balance sheets",
-            "statement of financial position",
-            "cash flow statement",
-            "cash flow statements",
-            "statement of cash flows",
-            "statements of cash flows",
-            "statement of stockholders' equity",
-            "statement of shareholders' equity",
-            "segment information",
-            "quarterly results",
-            "geographic information",
-        )
-        if phrase in clean
-    ]
-
-    generic_table_hints = []
-    for pattern in (
-        r"(note\s+\d+[a-z]?)",
-        r"(table\s+\d+[a-z]?)",
-        r"(item\s+\d+[a-z]?)",
-    ):
-        generic_table_hints.extend(re.findall(pattern, clean))
-
-    return {
-        "years": years,
-        "quarters": quarter_match,
-        "months": month_hits,
-        "period_hints": period_hints,
-        "section_hints": explicit_section_hints + generic_table_hints,
-    }
+from finance_document_qa.pipeline.filing_constraints import (
+    _extract_question_constraints,
+)
 
 
 def _append_constraint_lines(lines: list[str], constraints: dict[str, Any]) -> str:
@@ -133,7 +30,7 @@ def _append_constraint_lines(lines: list[str], constraints: dict[str, Any]) -> s
 
 
 def build_information_extraction_prompt(question: str) -> str:
-    constraints = extract_question_constraints(question)
+    constraints = _extract_question_constraints(question)
     lines = [
         "Information extraction prompt:",
         "- Prefer evidence whose section/table wording matches the question's report or section hint.",
@@ -155,7 +52,7 @@ def build_information_extraction_prompt(question: str) -> str:
 
 
 def build_numerical_reasoning_prompt(question: str) -> str:
-    constraints = extract_question_constraints(question)
+    constraints = _extract_question_constraints(question)
     lines = [
         "Numerical reasoning prompt:",
         "- This is a numerical reasoning question, not a direct single-value extraction question.",
@@ -176,7 +73,7 @@ def build_numerical_reasoning_prompt(question: str) -> str:
 
 
 def build_domain_relevant_prompt(question: str) -> str:
-    constraints = extract_question_constraints(question)
+    constraints = _extract_question_constraints(question)
     lines = [
         "Domain-relevant FinanceBench prompt:",
         "- Use retrieved evidence as the only source of truth; do not use outside knowledge.",
@@ -200,7 +97,7 @@ def build_domain_relevant_prompt(question: str) -> str:
 
 
 def build_novel_generated_prompt(question: str) -> str:
-    constraints = extract_question_constraints(question)
+    constraints = _extract_question_constraints(question)
     lines = [
         "Novel-generated FinanceBench prompt:",
         "- Use the retrieved evidence as the only source of truth; do not use outside knowledge.",

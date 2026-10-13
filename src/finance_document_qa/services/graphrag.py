@@ -49,6 +49,27 @@ class FinanceDocumentGraphRAGService(BaseFinanceDocumentService):
         )
 
 
+class FinanceDocumentGraphOnlyService(BaseFinanceDocumentService):
+    """Numerical evidence from graph queries only; no hybrid/vector search."""
+
+    retriever_mode = "graph"
+
+    def _build_core_retriever(self) -> Retriever:
+        return DualRetriever(
+            driver=self.driver,
+            chunk_retriever=None,
+            table_retriever=self._build_table_router(),
+            primary_retriever=PrimaryStatementRetriever(
+                driver=self.driver, neo4j_database=self.config.neo4j_database,
+            ),
+            metrics_retriever=MetricsTableCellRetriever(
+                driver=self.driver, neo4j_database=self.config.neo4j_database,
+            ),
+            neo4j_database=self.config.neo4j_database,
+            reranker_model=self.reranker_model if self.use_reranker else None,
+        )
+
+
 class FinanceDocumentText2CypherService(BaseFinanceDocumentService):
     """Graph query retrieval only: style-routed Text2Cypher over table cells."""
 

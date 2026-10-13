@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from neo4j_graphrag.preprocess.provenance import graph_source_properties
 
 from neo4j_graphrag.preprocess.statement_type import classify_statement_type
 
@@ -24,6 +27,7 @@ class ChunkRow:
     is_table: bool
     should_index: bool
     statement_type: str
+    source_properties: dict[str, Any] = field(default_factory=dict)
 
 
 def _require_env(name: str) -> str:
@@ -148,12 +152,18 @@ def _read_chunks(path: Path, *, strict: bool) -> dict[str, list[ChunkRow]]:
                     is_table=is_table,
                     should_index=should_index,
                     statement_type=statement_type,
+                    source_properties=graph_source_properties(metadata),
                 )
             )
 
     for doc_id, rows in by_doc.items():
         rows.sort(key=lambda r: (r.chunk_index, r.chunk_id))
     return by_doc
+
+
+def _doc_fingerprint(rows: list[ChunkRow]) -> str:
+    from dataclasses import asdict
+    return hashlib.sha256(json.dumps([asdict(r) for r in rows], sort_keys=True).encode()).hexdigest()
 
 
 def _create_constraints_and_indexes(
@@ -198,6 +208,17 @@ def _import_doc_tx(
     purge_doc_first: bool,
 ) -> None:
     if purge_doc_first:
+        # Remove table descendants before deleting their parent chunks, including
+        # tables left behind by older importers. Everything is one transaction.
+        tx.run(
+            """
+            MATCH (t:Table {doc_id: $doc_id})
+            OPTIONAL MATCH (t)-[:HAS_CELL]->(cell:TableCell)
+            WITH collect(DISTINCT cell) AS cells, collect(DISTINCT t) AS tables
+            FOREACH (cell IN cells | DETACH DELETE cell)
+            FOREACH (table IN tables | DETACH DELETE table)
+            """, doc_id=doc_id,
+        ).consume()
         tx.run(
             """
             OPTIONAL MATCH (f:Form {form_id: $form_id})
@@ -218,6 +239,14 @@ def _import_doc_tx(
             """,
             form_id=form_id,
         ).consume()
+
+    if not purge_doc_first:
+        stale = tx.run(
+            "MATCH (c:Chunk {doc_id: $doc_id}) WHERE NOT c.chunk_id IN $ids RETURN count(c) AS count",
+            doc_id=doc_id, ids=[row["chunk_id"] for row in rows_payload],
+        ).single()
+        if stale and stale["count"]:
+            raise ValueError("Document chunk IDs changed; use --purge-doc-first to replace this document")
 
     if company_id:
         tx.run(
@@ -260,8 +289,10 @@ def _import_doc_tx(
                 c.should_index = row.should_index,
                 c.statement_type = row.statement_type,
                 c.doc_id = $doc_id
+            SET c += row.source_properties
             SET s.statement_type = coalesce(s.statement_type, row.statement_type)
             MERGE (c)-[:IN_SECTION]->(s)
+            SET c += row.source_properties
             MERGE (c)-[:IN_FORM]->(f)
             MERGE (st:StatementType {name: row.statement_type})
             MERGE (c)-[:HAS_STATEMENT_TYPE]->(st)
@@ -286,6 +317,7 @@ def _import_doc_tx(
                 c.should_index = row.should_index,
                 c.statement_type = row.statement_type,
                 c.doc_id = $doc_id
+            SET c += row.source_properties
             MERGE (c)-[:IN_FORM]->(f)
             MERGE (st:StatementType {name: row.statement_type})
             MERGE (c)-[:HAS_STATEMENT_TYPE]->(st)
@@ -425,7 +457,7 @@ def main() -> None:
 
     doc_ids = sorted(by_doc.keys())
     if args.resume:
-        doc_ids = [d for d in doc_ids if state["docs"].get(d, {}).get("status") != "done"]
+        doc_ids = [d for d in doc_ids if state["docs"].get(d, {}).get("status") != "done" or state["docs"].get(d, {}).get("fingerprint") != _doc_fingerprint(by_doc[d])]
     if args.max_docs > 0:
         doc_ids = doc_ids[: args.max_docs]
 
@@ -469,6 +501,7 @@ def main() -> None:
                     "is_table": r.is_table,
                     "should_index": r.should_index,
                     "statement_type": r.statement_type,
+                    "source_properties": r.source_properties,
                 }
                 for r in rows
             ]
@@ -487,6 +520,7 @@ def main() -> None:
                     )
                 state["docs"][doc_id] = {
                     "status": "done",
+                    "fingerprint": _doc_fingerprint(rows),
                     "updated_at_utc": _now_utc(),
                     "chunk_count": len(rows_payload),
                     "form_id": form_id,

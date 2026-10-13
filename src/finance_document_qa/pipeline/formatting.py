@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import neo4j
+from neo4j_graphrag.preprocess.provenance import evidence_sources
 from neo4j_graphrag.types import RetrieverResultItem
 
 from finance_document_qa.pipeline.utils import _sanitize_for_json, _sanitize_value
+
+
+def _table_context(record: Any) -> list[dict[str, Any]]:
+    value = record.get("table_context_json") or "[]"
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except (ValueError, TypeError):
+        return []
+    return [c for c in value if isinstance(c, dict) and c.get("text")] if isinstance(value, list) else []
 
 
 def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
@@ -13,7 +24,16 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
     doc_id = str(record.get("doc_id") or "").strip()
     section_name = str(record.get("section_name") or "").strip()
     table_cells = _sanitize_for_json(record.get("table_cells") or [])
+    table_context = []
+    for cell in table_cells:
+        if isinstance(cell, dict):
+            for entry in _table_context(cell):
+                if entry not in table_context:
+                    table_context.append(entry)
+    sources = evidence_sources(record)
     lines = []
+    if sources["pages"]:
+        lines.append(f"Source: {doc_id}; PDF pages: {sources['pages']}")
     if section_name:
         lines.append(f"Section: {section_name}")
     if text:
@@ -23,6 +43,8 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
         for cell in table_cells[:10]:
             if not isinstance(cell, dict):
                 continue
+            if cell.get("table_title"):
+                lines.append(f"Table title: {cell['table_title']}")
             row_header = cell.get("row_header")
             col_header = cell.get("col_header")
             cell_text = cell.get("text")
@@ -33,6 +55,8 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
                 f"- row={row_header!r}; col={col_header!r}; text={cell_text!r}; "
                 f"numeric_value={numeric_value!r}; numeric_kind={numeric_kind!r}; scale={scale!r}"
             )
+    if table_context:
+        lines.append("Table context:\n" + "\n".join(str(c["text"]) for c in table_context))
     if not lines:
         lines.append(str(record))
     return RetrieverResultItem(
@@ -43,6 +67,8 @@ def _format_chunk_record(record: neo4j.Record) -> RetrieverResultItem:
                 "section_name": section_name or None,
                 "similarity_score": record.get("similarity_score"),
                 "source": "chunk",
+                "table_context": table_context,
+                **sources,
             }
         ),
     )
@@ -57,11 +83,20 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
     numeric_value = _sanitize_value(record.get("numeric_value"))
     numeric_kind = _sanitize_value(record.get("numeric_kind"))
     scale = _sanitize_value(record.get("scale"))
+    sources = evidence_sources(record)
+    table_context = _table_context(record)
+    table_title = record.get("table_title")
     content = (
         f"Section: {section_name}\n"
         f"Table evidence: row={row_header!r}; col={col_header!r}; text={text!r}; "
         f"numeric_value={numeric_value!r}; numeric_kind={numeric_kind!r}; scale={scale!r}"
     )
+    if table_title:
+        content = f"Table title: {table_title}\n" + content
+    if table_context:
+        content += "\nTable context:\n" + "\n".join(str(c["text"]) for c in table_context)
+    if sources["pages"]:
+        content = f"Source: {doc_id}; PDF pages: {sources['pages']}\n" + content
     return RetrieverResultItem(
         content=content,
         metadata=_sanitize_for_json(
@@ -75,6 +110,11 @@ def _format_table_record(record: neo4j.Record) -> RetrieverResultItem:
                 "numeric_kind": numeric_kind,
                 "scale": scale,
                 "source": "table",
+                "table_title": table_title,
+                "table_title_source": record.get("table_title_source"),
+                "table_title_source_refs": record.get("table_title_source_refs") or [],
+                "table_context": table_context,
+                **sources,
             }
         ),
     )
@@ -165,6 +205,9 @@ def _standardize_retrieved_contexts(
                 "doc_id": metadata.get("doc_id"),
                 "doc_name": metadata.get("doc_name") or metadata.get("doc_id"),
                 "section_name": metadata.get("section_name"),
+                "pages": metadata.get("pages") or [],
+                "source_refs": metadata.get("source_refs") or [],
+                "provenance": metadata.get("provenance") or [],
                 "metadata": _sanitize_for_json(metadata),
             }
         )

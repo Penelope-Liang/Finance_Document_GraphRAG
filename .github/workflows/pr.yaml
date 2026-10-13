@@ -36,7 +36,7 @@ jobs:
           key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
 
       - name: Install dependencies
-        run: uv sync --frozen --extra ollama --extra openai --group dev
+        run: uv sync --frozen --extra ollama --extra openai --extra app --group dev
 
       - name: Run lint
         run: uv run ruff check src scripts

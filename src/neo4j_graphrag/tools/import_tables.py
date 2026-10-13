@@ -5,9 +5,12 @@ import json
 import os
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+from neo4j_graphrag.preprocess.provenance import graph_source_properties
 
 
 def _import_neo4j():
@@ -36,8 +39,8 @@ class TableChunkRow:
     section_name: str
     page: int | None
     parser_engine: str
-    table_html: str
     table_structured: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _load_ndjson(path: Path, *, strict: bool) -> list[dict[str, Any]]:
@@ -94,8 +97,8 @@ def _read_tables(path: Path, *, strict: bool) -> dict[str, list[TableChunkRow]]:
                 section_name=str(payload.get("section_name") or "UNSPECIFIED"),
                 page=int(page) if isinstance(page, (int, float)) else None,
                 parser_engine=str(payload.get("parser_engine") or ""),
-                table_html=str(metadata.get("table_html") or ""),
                 table_structured=table_structured,
+                metadata=metadata,
             )
         )
     for doc_id, doc_rows in by_doc.items():
@@ -105,12 +108,19 @@ def _read_tables(path: Path, *, strict: bool) -> dict[str, list[TableChunkRow]]:
 
 def _build_table_payload(row: TableChunkRow, *, cell_mode: str) -> dict[str, Any]:
     table_id = row.chunk_id
+    captions = [c for c in (row.metadata.get("table_context") or [])
+                if c.get("kind") == "captions" and str(c.get("text") or "").strip()]
+    titles = {" ".join(str(c["text"]).split()) for c in captions}
+    # A chapter heading or ambiguous set of captions is not a confirmed table title.
+    title = next(iter(titles)) if len(titles) == 1 else None
+    title_refs = list(dict.fromkeys(c["source_ref"] for c in captions
+                                   if title and c.get("source_ref")))
     cells = row.table_structured.get("numeric_cells") if cell_mode == "numeric" else row.table_structured.get("cells")
     if not isinstance(cells, list):
         cells = []
     cell_rows: list[dict[str, Any]] = []
     for cell in cells:
-        if not isinstance(cell, dict):
+        if not isinstance(cell, dict) or cell.get("is_span_ref"):
             continue
         cell_id = f"{table_id}:{cell.get('row_idx')}:{cell.get('col_idx')}"
         payload = {
@@ -132,6 +142,15 @@ def _build_table_payload(row: TableChunkRow, *, cell_mode: str) -> dict[str, Any
             payload["numeric_kind"] = cell.get("numeric_kind")
             payload["scale"] = cell.get("scale")
             payload["normalized_value"] = cell.get("normalized_value")
+        sources = dict(row.metadata.get("table_sources") or row.metadata)
+        for key in ("source_refs", "provenance"):
+            if key in cell:
+                sources[key] = cell[key]
+        sources["pages"] = sorted({p["page_no"] for p in sources.get("provenance", []) if isinstance(p.get("page_no"), int)}) or sources.get("pages", [])
+        payload["source_properties"] = graph_source_properties(sources)
+        payload["source_properties"]["provenance_scope"] = cell.get("provenance_scope", "table")
+        payload["source_properties"]["doc_id"] = row.doc_id
+        payload["source_properties"]["raw_bbox_json"] = json.dumps(cell.get("raw_bbox"))
         cell_rows.append(payload)
     return {
         "table_id": table_id,
@@ -141,10 +160,18 @@ def _build_table_payload(row: TableChunkRow, *, cell_mode: str) -> dict[str, Any
         "section_name": row.section_name,
         "page": row.page,
         "parser_engine": row.parser_engine,
-        "table_html": row.table_html,
         "n_rows": row.table_structured.get("n_rows"),
         "n_cols": row.table_structured.get("n_cols"),
         "cell_rows": cell_rows,
+        "source_properties": {
+            **graph_source_properties(row.metadata.get("table_sources") or row.metadata),
+            "title": title,
+            "title_source": "docling_caption" if title else None,
+            "title_source_refs": title_refs,
+            "table_context_json": json.dumps(row.metadata.get("table_context") or [], ensure_ascii=False),
+            "possible_continuation": bool(row.metadata.get("possible_continuation")),
+            "continuation_reason": row.metadata.get("continuation_reason"),
+        },
     }
 
 
@@ -173,7 +200,9 @@ def _purge_doc_tables_tx(tx: Any, *, doc_id: str) -> None:
     ).consume()
 
 
-def _import_doc_tables_tx(tx: Any, *, rows: list[dict[str, Any]]) -> None:
+def _import_doc_tables_tx(tx: Any, *, rows: list[dict[str, Any]], purge_doc_id: str | None = None) -> None:
+    if purge_doc_id is not None:
+        _purge_doc_tables_tx(tx, doc_id=purge_doc_id)
     tx.run(
         """
         UNWIND $rows AS row
@@ -186,8 +215,8 @@ def _import_doc_tables_tx(tx: Any, *, rows: list[dict[str, Any]]) -> None:
             table.page = row.page,
             table.parser_engine = row.parser_engine,
             table.n_rows = row.n_rows,
-            table.n_cols = row.n_cols,
-            table.table_html = row.table_html
+            table.n_cols = row.n_cols
+        SET table += row.source_properties
         MERGE (chunk)-[:HAS_TABLE]->(table)
         WITH row, table
         UNWIND row.cell_rows AS cell_row
@@ -207,6 +236,7 @@ def _import_doc_tables_tx(tx: Any, *, rows: list[dict[str, Any]]) -> None:
             cell.numeric_kind = cell_row.numeric_kind,
             cell.scale = cell_row.scale,
             cell.normalized_value = cell_row.normalized_value
+        SET cell += cell_row.source_properties
         MERGE (table)-[:HAS_CELL]->(cell)
         """,
         rows=rows,
@@ -278,13 +308,11 @@ def main() -> None:
         _create_schema(driver, database=args.neo4j_database)
         with driver.session(database=args.neo4j_database) as session:
             for doc_id, doc_rows in sorted(by_doc.items()):
-                if args.purge_doc_first:
-                    session.execute_write(_purge_doc_tables_tx, doc_id=doc_id)
                 payload_rows = [
                     _build_table_payload(row, cell_mode=args.cell_mode)
                     for row in doc_rows
                 ]
-                session.execute_write(_import_doc_tables_tx, rows=payload_rows)
+                session.execute_write(_import_doc_tables_tx, rows=payload_rows, purge_doc_id=doc_id if args.purge_doc_first else None)
                 imported_docs += 1
                 imported_tables += len(payload_rows)
                 imported_cells += sum(len(row["cell_rows"]) for row in payload_rows)

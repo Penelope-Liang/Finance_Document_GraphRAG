@@ -12,10 +12,12 @@ class CleanBlock:
     page: Optional[int]
     section: str
     order: int
-    html: Optional[str] = None
-    grid: Optional[list[list[dict[str, Any]]]] = None
     bbox: Optional[list[list[float]]] = None
     attrs: dict[str, Any] = field(default_factory=dict)
+    provenance: list[dict[str, Any]] = field(default_factory=list)
+    source_refs: list[str] = field(default_factory=list)
+    section_path: list[str] = field(default_factory=list)
+    table_data: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

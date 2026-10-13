@@ -1,0 +1,13 @@
+[
+  {"doc_id":"APPLE_2018_10K.pdf","page":41,"row_header":"Net sales","period":["2018"],"numeric_value":265595,"normalized_value":265595000000,"numeric_kind":"AMOUNT","scale":"million"},
+  {"doc_id":"APPLE_2018_10K.pdf","page":41,"row_header":"Gross margin","period":["2018"],"numeric_value":101839,"normalized_value":101839000000,"numeric_kind":"AMOUNT","scale":"million"},
+  {"doc_id":"APPLE_2018_10K.pdf","page":41,"row_header":"Earnings per share: | Basic","period":["2018"],"numeric_value":12.01,"normalized_value":12.01,"numeric_kind":"PLAIN","scale":""},
+  {"doc_id":"APPLE_2018_10K.pdf","page":41,"row_header":"Shares used in computing earnings per share: | Basic","period":["2018"],"numeric_value":4955377,"normalized_value":4955377000,"numeric_kind":"SHARES","scale":"thousand"},
+  {"doc_id":"BESTBUY_2024Q2_10Q.pdf","page":4,"row_header":"Revenue","period":["Three Months Ended","2023"],"numeric_value":9583,"normalized_value":9583000000,"numeric_kind":"AMOUNT","scale":"million"},
+  {"doc_id":"BESTBUY_2024Q2_10Q.pdf","page":4,"row_header":"Revenue","period":["Six Months Ended","2023"],"numeric_value":19050,"normalized_value":19050000000,"numeric_kind":"AMOUNT","scale":"million"},
+  {"doc_id":"BESTBUY_2024Q2_10Q.pdf","page":4,"row_header":"Interest expense","period":["Three Months Ended","2023"],"numeric_value":-12,"normalized_value":-12000000,"numeric_kind":"AMOUNT","scale":"million"},
+  {"doc_id":"BESTBUY_2024Q2_10Q.pdf","page":4,"row_header":"Basic earnings per share","period":["Three Months Ended","2023"],"numeric_value":1.25,"normalized_value":1.25,"numeric_kind":"PLAIN","scale":""},
+  {"doc_id":"JPMORGAN_2023Q2_10Q.pdf","page":198,"row_header":"Deposits with banks","period":["Three months ended June 30, 2023","Average balance"],"numeric_value":495018,"normalized_value":495018000000,"numeric_kind":"AMOUNT","scale":"million"},
+  {"doc_id":"JPMORGAN_2023Q2_10Q.pdf","page":198,"row_header":"Deposits with banks","period":["Three months ended June 30, 2023","Rate (annualized)"],"numeric_value":0.042,"normalized_value":0.042,"numeric_kind":"PERCENT","scale":"percent"},
+  {"doc_id":"JPMORGAN_2023Q2_10Q.pdf","page":198,"row_header":"Federal funds sold and securities purchased under resale agreements","period":["Three months ended June 30, 2023","Rate (annualized)"],"numeric_value":0.0463,"normalized_value":0.0463,"numeric_kind":"PERCENT","scale":"percent"}
+]

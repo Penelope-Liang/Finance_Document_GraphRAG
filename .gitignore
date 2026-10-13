@@ -11,6 +11,7 @@ docs/build/
 .python-version
 .DS_Store
 .venv
+.venv-docling/
 .tox/
 
 # Large dataset files (download locally or use Hugging Face)
@@ -24,4 +25,4 @@ output/
 third_party_unstructured_src/
 
 # Archived code (kept locally but not tracked)
-_archive/
+/_aricheve/

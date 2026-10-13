@@ -8,13 +8,15 @@ from pathlib import Path
 from typing import Any, Optional
 import re
 
+from neo4j_graphrag.preprocess.provenance import merge_sources
+
 from neo4j_graphrag.preprocess.chunk_utils import (
     compute_chunk_id,
     normalize_section_display,
 )
 
 
-KEEP_CATEGORIES = {"Title", "NarrativeText", "Table", "ListItem"}
+KEEP_CATEGORIES = {"Title", "NarrativeText", "Table", "ListItem", "Caption", "Footnote", "Formula", "Code"}
 OPTIONAL_CATEGORIES = {"UncategorizedText"}
 
 
@@ -40,11 +42,22 @@ class ChunkBuffer:
     element_types: list[str] = field(default_factory=list)
     pages: list[int] = field(default_factory=list)
     bboxes: list[list[list[float]]] = field(default_factory=list)
-    table_html: Optional[str] = None
+    table_data: Optional[dict[str, Any]] = None
+    table_sources: dict[str, Any] = field(default_factory=dict)
+    table_context: list[dict[str, Any]] = field(default_factory=list)
+    table_attrs: dict[str, Any] = field(default_factory=dict)
+    source_metadata: list[dict[str, Any]] = field(default_factory=list)
     parser_engines: list[str] = field(default_factory=list)
     intermediate_schemas: list[str] = field(default_factory=list)
 
     def add(self, row: ElementRow) -> None:
+        self.source_metadata.append({**row.metadata, "pages": sorted(set(row.metadata.get("pages") or []) | ({row.page} if row.page is not None else set()))})
+        self.pages.extend(row.metadata.get("pages") or [])
+        if row.category == "Table":
+            self.table_data = row.metadata.get("table_data")
+            self.table_sources = merge_sources([row.metadata])
+            self.table_context = row.metadata.get("table_context") or []
+            self.table_attrs = {k: row.metadata.get(k) for k in ("possible_continuation", "continuation_reason")}
         self.texts.append(row.text.strip())
         self.element_indices.append(row.element_index)
         self.element_types.append(row.category)
@@ -52,9 +65,6 @@ class ChunkBuffer:
             self.pages.append(row.page)
         if row.bbox:
             self.bboxes.append(row.bbox)
-        html = row.metadata.get("text_as_html")
-        if isinstance(html, str) and html.strip() and row.category == "Table":
-            self.table_html = html
         parser_backend = str(row.metadata.get("parser_backend") or "").strip().lower()
         if parser_backend:
             self.parser_engines.append(parser_backend)
@@ -80,7 +90,7 @@ class ChunkBuffer:
     def build_metadata(self, *, last_chunk_is_front_matter: bool = False) -> dict[str, Any]:
         page_start = min(self.pages) if self.pages else None
         page_end = max(self.pages) if self.pages else None
-        bbox_union = _merge_bboxes(self.bboxes)
+        bbox_union = _merge_bboxes(self.bboxes) if len(set(self.pages)) <= 1 else None
         preview_text = self.build_text()
         is_toc_like = _is_toc_like_text(preview_text, self.is_table)
         is_front_matter = _is_front_matter_chunk(
@@ -102,7 +112,11 @@ class ChunkBuffer:
             "element_types": self.element_types,
             "is_table": self.is_table,
             "bbox_union": bbox_union,
-            "table_html": self.table_html,
+            "table_data": self.table_data,
+            "table_context": self.table_context,
+            "table_sources": self.table_sources,
+            **self.table_attrs,
+            **merge_sources(self.source_metadata),
             "title_text": self.title_text or "",
             "is_toc_like": is_toc_like,
             "is_front_matter": is_front_matter,
@@ -150,7 +164,7 @@ def _read_elements(path: Path) -> list[ElementRow]:
                 metadata=payload.get("metadata") or {},
             )
         )
-    rows.sort(key=lambda r: (r.doc_id, r.page or 0, r.element_index))
+    rows.sort(key=lambda r: (r.doc_id, r.element_index))
     return rows
 
 
@@ -343,7 +357,7 @@ def _make_record(
     *,
     buffer: ChunkBuffer,
     chunk_index: int,
-    chunk_id_version: str,
+    chunk_id_version: str | None,
     source_type: str,
     chunk_engine: str,
     last_chunk_is_front_matter: bool = False,
@@ -352,6 +366,8 @@ def _make_record(
     if not text:
         return None
     section_name = normalize_section_display(buffer.section_name)
+    metadata = buffer.build_metadata(last_chunk_is_front_matter=last_chunk_is_front_matter)
+    chunk_id_version = chunk_id_version or metadata.get("pipeline_version") or "v1"
     chunk_id = compute_chunk_id(
         version=chunk_id_version,
         doc_id=buffer.doc_id,
@@ -359,7 +375,6 @@ def _make_record(
         chunk_index=chunk_index,
         text=text,
     )
-    metadata = buffer.build_metadata(last_chunk_is_front_matter=last_chunk_is_front_matter)
     return {
         "chunk_id": chunk_id,
         "chunk_id_version": chunk_id_version,
@@ -387,7 +402,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True, help="Output chunks NDJSON path.")
     parser.add_argument(
         "--chunk-id-version",
-        default="v1",
+        default=None,
         help="Version prefix embedded in chunk_id hash payload.",
     )
     parser.add_argument(
@@ -410,22 +425,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    args = build_parser().parse_args()
-
-    elements_path = Path(args.elements_path).expanduser().resolve()
-    if not elements_path.exists():
-        print(f"Elements path does not exist: {elements_path}", file=sys.stderr)
-        sys.exit(1)
-
-    output_path = Path(args.output).expanduser().resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    rows = _read_elements(elements_path)
-    if not rows:
-        print("No elements found.", file=sys.stderr)
-        sys.exit(1)
-
+def build_chunks(
+    rows: list[ElementRow], *, chunk_id_version: str | None = None,
+    target_max_chars: int = 2048, min_uncategorized_len: int = 12,
+    merge_table_fragments: bool = False,
+) -> list[dict[str, Any]]:
     out_records: list[dict[str, Any]] = []
     current_doc: Optional[str] = None
     current_section = "UNSPECIFIED"
@@ -443,7 +447,7 @@ def main() -> None:
         record = _make_record(
             buffer=buffer,
             chunk_index=chunk_index,
-            chunk_id_version=args.chunk_id_version,
+            chunk_id_version=chunk_id_version,
             source_type="pdf",
             chunk_engine="elements_structured",
             last_chunk_is_front_matter=last_chunk_is_front_matter,
@@ -457,17 +461,18 @@ def main() -> None:
         buffer = None
 
     for row in rows:
-        if _is_noise(row, args.min_uncategorized_len):
+        if _is_noise(row, min_uncategorized_len):
             continue
         if row.category == "UncategorizedText" and not _looks_like_substantive_uncategorized(
             row.text,
-            args.min_uncategorized_len,
+            min_uncategorized_len,
         ):
             continue
 
         if current_doc != row.doc_id:
             flush_buffer()
             current_doc = row.doc_id
+            chunk_index = 0
             current_section = "UNSPECIFIED"
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
             pending_table_record = None
@@ -493,7 +498,7 @@ def main() -> None:
             record = _make_record(
                 buffer=table_buffer,
                 chunk_index=chunk_index,
-                chunk_id_version=args.chunk_id_version,
+                chunk_id_version=chunk_id_version,
                 source_type="pdf",
                 chunk_engine="elements_table",
                 last_chunk_is_front_matter=last_chunk_is_front_matter,
@@ -509,16 +514,17 @@ def main() -> None:
             continue
 
         if (
-            args.merge_table_fragments
+            merge_table_fragments
             and pending_table_record is not None
             and row.category == "UncategorizedText"
             and row.page == pending_table_record.get("page")
-            and len(row.text.strip()) <= max(80, args.min_uncategorized_len)
+            and len(row.text.strip()) <= max(80, min_uncategorized_len)
         ):
             pending_table_record["text"] = f"{pending_table_record['text']}\n{row.text.strip()}".strip()
             meta = pending_table_record.get("metadata") or {}
             meta["element_indices"] = list(meta.get("element_indices") or []) + [row.element_index]
             meta["element_types"] = list(meta.get("element_types") or []) + [row.category]
+            meta.update(merge_sources([meta, row.metadata]))
             pending_table_record["metadata"] = meta
             continue
 
@@ -531,7 +537,7 @@ def main() -> None:
             pending_title = None
 
         projected = buffer.char_count + len(row.text.strip()) + (2 if buffer.texts else 0)
-        if buffer.texts and projected > args.target_max_chars:
+        if buffer.texts and projected > target_max_chars:
             flush_buffer()
             buffer = _new_buffer(doc_id=row.doc_id, section_name=current_section)
             if pending_title is not None and buffer.is_empty:
@@ -542,6 +548,30 @@ def main() -> None:
         buffer.add(row)
 
     flush_buffer()
+
+    return out_records
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+
+    elements_path = Path(args.elements_path).expanduser().resolve()
+    if not elements_path.exists():
+        print(f"Elements path does not exist: {elements_path}", file=sys.stderr)
+        sys.exit(1)
+
+    output_path = Path(args.output).expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = _read_elements(elements_path)
+    if not rows:
+        print("No elements found.", file=sys.stderr)
+        sys.exit(1)
+
+    out_records = build_chunks(
+        rows, chunk_id_version=args.chunk_id_version, target_max_chars=args.target_max_chars,
+        min_uncategorized_len=args.min_uncategorized_len, merge_table_fragments=args.merge_table_fragments,
+    )
 
     with output_path.open("w", encoding="utf-8") as out:
         for record in out_records:

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import re
 import sys
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Optional
 
@@ -97,13 +97,6 @@ _EMPTY_VALUES = {
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
-
-
-def _safe_int(value: Optional[str], default: int = 1) -> int:
-    try:
-        return max(default, int(value or default))
-    except (TypeError, ValueError):
-        return default
 
 
 def _is_empty_text(text: str) -> bool:
@@ -237,10 +230,14 @@ def _infer_numeric_kind(
     # Explicit PERCENT signals: % symbol, or unambiguous percentage context words.
     # Removed broad terms like "change", "growth", "translation", "divestitures"
     # which frequently appear on dollar-amount rows too.
-    if "%" in clean or any(hint in context or hint.replace(" ", "") in compact_context for hint in _PERCENT_CONTEXT_HINTS):
+    if "%" in clean or "rate (annualized)" in col_header.lower() or any((hint != "margin" or not has_scale) and (hint in context or hint.replace(" ", "") in compact_context) for hint in _PERCENT_CONTEXT_HINTS):
         return "PERCENT"
     if any(hint in normalized_row_header or hint.replace(" ", "") in compact_row_header for hint in _ROW_PERCENT_HINTS):
         return "PERCENT"
+
+    # Share-count columns/groups are not per-share currency amounts.
+    if (re.search(r"\bshares\b", normalized_row_header) and not re.search(r"\bper shares?\b", normalized_row_header)) or "shares used in computing" in normalized_row_header or re.search(r"\bshares\b", col_header.lower()):
+        return "SHARES"
 
     # Explicit PLAIN signals: per-share or ratio metrics that should never be scaled.
     if any(token in context for token in ("per share", "eps", "diluted share", "basic share")):
@@ -270,124 +267,41 @@ def _normalize_percent_value(text: str, value: float) -> float:
     return value / 100.0
 
 
-class _TableHTMLParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.cells: list[dict[str, Any]] = []
-        self._in_table = False
-        self._row_index = -1
-        self._open_cell: Optional[dict[str, Any]] = None
-        self._capture: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
-        attrs_dict = dict(attrs)
-        if tag == "table":
-            self._in_table = True
-            return
-        if not self._in_table:
-            return
-        if tag == "tr":
-            self._row_index += 1
-            return
-        if tag in {"td", "th"}:
-            self._open_cell = {
-                "row": self._row_index,
-                "colspan": _safe_int(attrs_dict.get("colspan"), 1),
-                "rowspan": _safe_int(attrs_dict.get("rowspan"), 1),
-                "is_header": tag == "th",
-            }
-            self._capture = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "table":
-            self._in_table = False
-            return
-        if not self._in_table:
-            return
-        if tag in {"td", "th"} and self._open_cell is not None:
-            cell = dict(self._open_cell)
-            cell["text"] = _normalize_space("".join(self._capture))
-            self.cells.append(cell)
-            self._open_cell = None
-            self._capture = []
-
-    def handle_data(self, data: str) -> None:
-        if self._open_cell is not None:
-            self._capture.append(data)
-
-
-def _parse_table_html(table_html: str) -> list[list[dict[str, Any]]]:
-    parser = _TableHTMLParser()
-    parser.feed(table_html)
-    if not parser.cells:
-        return []
-
-    grid: list[list[Optional[dict[str, Any]]]] = []
-    open_spans: dict[tuple[int, int], dict[str, Any]] = {}
-
-    def ensure_pos(row_idx: int, col_idx: int) -> None:
-        while len(grid) <= row_idx:
-            grid.append([])
-        row = grid[row_idx]
-        while len(row) <= col_idx:
-            row.append(None)
-
-    cells_by_row: dict[int, list[dict[str, Any]]] = {}
-    for cell in parser.cells:
-        cells_by_row.setdefault(int(cell["row"]), []).append(cell)
-
-    max_row = max(cells_by_row) if cells_by_row else -1
-    for row_idx in range(max_row + 1):
-        row_cells = cells_by_row.get(row_idx, [])
-        col_idx = 0
-        for cell in row_cells:
-            while (row_idx, col_idx) in open_spans:
-                span_cell = open_spans[(row_idx, col_idx)]
-                ensure_pos(row_idx, col_idx)
-                grid[row_idx][col_idx] = dict(span_cell, is_span_ref=True)
-                del open_spans[(row_idx, col_idx)]
-                col_idx += 1
-
-            base_cell = {
-                "row_idx": row_idx,
-                "col_idx": col_idx,
-                "text": cell["text"],
-                "is_header": bool(cell["is_header"]),
-                "rowspan": int(cell["rowspan"]),
-                "colspan": int(cell["colspan"]),
-                "is_span_ref": False,
-            }
-            for r_off in range(base_cell["rowspan"]):
-                for c_off in range(base_cell["colspan"]):
-                    target_row = row_idx + r_off
-                    target_col = col_idx + c_off
-                    ensure_pos(target_row, target_col)
-                    if r_off == 0 and c_off == 0:
-                        grid[target_row][target_col] = base_cell
-                    else:
-                        span_ref = dict(base_cell, is_span_ref=True)
-                        if target_row == row_idx:
-                            grid[target_row][target_col] = span_ref
-                        else:
-                            open_spans[(target_row, target_col)] = span_ref
-            col_idx += base_cell["colspan"]
-
-        while (row_idx, col_idx) in open_spans:
-            span_cell = open_spans[(row_idx, col_idx)]
-            ensure_pos(row_idx, col_idx)
-            grid[row_idx][col_idx] = dict(span_cell, is_span_ref=True)
-            del open_spans[(row_idx, col_idx)]
-            col_idx += 1
-
-    return [[cell or {
-        "row_idx": row_idx,
-        "col_idx": col_idx,
-        "text": "",
-        "is_header": False,
-        "rowspan": 1,
-        "colspan": 1,
-        "is_span_ref": False,
-    } for col_idx, cell in enumerate(row)] for row_idx, row in enumerate(grid)]
+def _grid_from_docling(data: dict[str, Any]) -> list[list[dict[str, Any]]]:
+    """Expand spans for header lookup; each numeric anchor is emitted once."""
+    n_rows, n_cols = int(data["num_rows"]), int(data["num_cols"])
+    if n_rows < 0 or n_cols < 0 or n_rows * n_cols > 1_000_000:
+        raise ValueError("Invalid or excessively large table dimensions")
+    grid = [[{
+        "row_idx": r, "col_idx": c, "text": "", "is_header": False,
+        "rowspan": 1, "colspan": 1, "is_span_ref": False, "native_structure": True,
+    } for c in range(n_cols)] for r in range(n_rows)]
+    occupied: set[tuple[int, int]] = set()
+    for cell in data.get("table_cells", []):
+        r0, c0 = int(cell["start_row_offset_idx"]), int(cell["start_col_offset_idx"])
+        r1, c1 = int(cell["end_row_offset_idx"]), int(cell["end_col_offset_idx"])
+        if not (0 <= r0 < r1 <= n_rows and 0 <= c0 < c1 <= n_cols):
+            raise ValueError(f"Invalid table cell offsets: {(r0, r1, c0, c1)}")
+        if int(cell.get("row_span", r1-r0)) != r1-r0 or int(cell.get("col_span", c1-c0)) != c1-c0:
+            raise ValueError("Cell offsets and span disagree")
+        for r in range(r0, r1):
+            for c in range(c0, c1):
+                if (r, c) in occupied:
+                    raise ValueError(f"Overlapping table cells at {(r, c)}")
+                occupied.add((r, c))
+                grid[r][c] = {
+                    "row_idx": r, "col_idx": c, "text": _normalize_space(str(cell.get("text", ""))),
+                    "is_header": bool(cell.get("column_header") or cell.get("row_header") or cell.get("row_section")),
+                    "column_header": bool(cell.get("column_header")),
+                    "docling_row_header": bool(cell.get("row_header")), "row_section": bool(cell.get("row_section")),
+                    "rowspan": r1-r0, "colspan": c1-c0, "is_span_ref": (r,c) != (r0,c0),
+                    "anchor_row_idx": r0, "anchor_col_idx": c0, "native_structure": True,
+                    "source_refs": list(cell.get("source_refs") or []),
+                    "provenance": deepcopy(cell.get("provenance") or []),
+                    "provenance_scope": cell.get("provenance_scope", "unknown"),
+                    "raw_bbox": cell.get("bbox"),
+                }
+    return grid
 
 
 def _classify_grid(
@@ -422,7 +336,11 @@ def _classify_grid(
 
             if _is_empty_text(text):
                 cell_type = "EMPTY"
-            elif _is_year(text):
+            elif cell.get("native_structure") and cell.get("column_header"):
+                cell_type = "YEAR" if _is_year(text) else "COL_HEADER"
+            elif cell.get("native_structure") and (cell.get("docling_row_header") or cell.get("row_section")):
+                cell_type = "ROW_HEADER"
+            elif _is_year(text) and not cell.get("native_structure"):
                 cell_type = "YEAR"
             elif cell["is_header"] and (cell["col_idx"] > 0 or _is_period_header_text(text)):
                 cell_type = "COL_HEADER"
@@ -466,6 +384,12 @@ def _classify_grid(
             if numeric_kind == "AMOUNT" and scale_factor != 1.0:
                 normalized_value = cell["numeric_value"] * scale_factor
                 applied_scale = scale_label
+            elif numeric_kind == "SHARES":
+                annotation = " ".join([title_text, section_name])
+                share_unit = re.search(r"(?:number of shares|shares)[^.;]{0,65}?in (thousands|millions|billions)", annotation, re.I)
+                share_label, share_factor = _infer_scale(["in " + share_unit.group(1)]) if share_unit else (scale_label, scale_factor)
+                normalized_value = cell["numeric_value"] * share_factor
+                applied_scale = share_label
             elif numeric_kind == "PERCENT":
                 cell["numeric_value"] = _normalize_percent_value(cell["text"], cell["numeric_value"])
                 normalized_value = cell["numeric_value"]
@@ -484,13 +408,23 @@ def _find_left_header(grid: list[list[dict[str, Any]]], row_idx: int, col_idx: i
     for idx in range(col_idx - 1, -1, -1):
         cell = row[idx]
         if cell["cell_type"] in {"ROW_HEADER", "TEXT"} and not _is_empty_text(cell["text"]):
-            return cell["text"]
+            header = cell["text"]
+            if cell.get("native_structure") and header.strip().lower() in {"basic", "diluted"}:
+                for above in reversed(grid[:row_idx]):
+                    # A row-group label with otherwise empty cells scopes Basic/Diluted.
+                    labels = [c["text"] for c in above if c["cell_type"] == "ROW_HEADER" and not c.get("is_span_ref")]
+                    if labels and all(c["cell_type"] in {"ROW_HEADER", "EMPTY"} for c in above):
+                        header = " | ".join(labels + [header])
+                        break
+            return header
     return ""
 
 
 def _find_top_header(grid: list[list[dict[str, Any]]], row_idx: int, col_idx: int) -> str:
     parts: list[str] = []
     for idx in range(row_idx - 1, -1, -1):
+        if col_idx >= len(grid[idx]):
+            continue
         cell = grid[idx][col_idx]
         if cell["cell_type"] in {"COL_HEADER", "YEAR"} and not _is_empty_text(cell["text"]):
             text = cell["text"]
@@ -501,15 +435,23 @@ def _find_top_header(grid: list[list[dict[str, Any]]], row_idx: int, col_idx: in
 
 def _build_table_structured(
     *,
-    table_html: str,
+    table_data: dict[str, Any],
+    table_context: list[dict[str, Any]] | None = None,
     title_text: str,
     section_name: str,
     chunk_text: str,
 ) -> dict[str, Any]:
-    grid = _parse_table_html(table_html)
+    if not isinstance(table_data, dict):
+        raise ValueError("Native Docling table_data is required; reparse legacy inputs as JSON.")
+    grid = _grid_from_docling(table_data)
+    # Marker-matched notes are retrieval evidence, not table-wide unit overrides.
+    context_text = " ".join(
+        str(c.get("text", "")) for c in (table_context or [])
+        if c.get("kind") != "matched_footnote"
+    )
     grid = _classify_grid(
         grid,
-        title_text=title_text,
+        title_text=title_text + " " + context_text,
         section_name=section_name,
         chunk_text=chunk_text,
     )
@@ -528,6 +470,9 @@ def _build_table_structured(
                 "rowspan": int(cell["rowspan"]),
                 "colspan": int(cell["colspan"]),
             }
+            for key in ("source_refs", "provenance", "provenance_scope", "raw_bbox", "anchor_row_idx", "anchor_col_idx", "column_header", "docling_row_header", "row_section"):
+                if key in cell:
+                    record[key] = cell[key]
             if cell["numeric_value"] is not None:
                 record["numeric_value"] = cell["numeric_value"]
                 record["numeric_kind"] = cell["numeric_kind"]
@@ -579,7 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Fail fast if one table_html row cannot be parsed.",
+        help="Fail fast if one structured JSON table cannot be parsed.",
     )
     return parser
 
@@ -607,12 +552,12 @@ def main() -> None:
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
                 continue
 
-            table_html = str(metadata.get("table_html") or "").strip()
             is_table = bool(metadata.get("is_table")) or str(row.get("chunk_engine") or "") == "elements_table"
-            if is_table and table_html:
+            if is_table:
                 try:
                     metadata["table_structured"] = _build_table_structured(
-                        table_html=table_html,
+                        table_data=metadata.get("table_data"),
+                        table_context=metadata.get("table_context"),
                         title_text=str(metadata.get("title_text") or ""),
                         section_name=str(row.get("section_name") or ""),
                         chunk_text=str(row.get("text") or ""),

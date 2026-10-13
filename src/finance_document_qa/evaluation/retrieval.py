@@ -1,62 +1,18 @@
 import argparse
 import asyncio
 import json
-import math
 import os
 from pathlib import Path
 
+from finance_document_qa.evaluation.utils import (
+    clean_score,
+    get_retrieved_contexts,
+    load_rows,
+    mean_metric,
+    save_rows,
+    selected_rows,
+)
 from finance_document_qa.evaluation.ragas_components import build_ragas_azure_components
-
-
-def load_rows(path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def save_rows(path, rows):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(rows, indent=2, ensure_ascii=False, allow_nan=False),
-        encoding="utf-8",
-    )
-
-
-def context_text(context):
-    if isinstance(context, str):
-        return context.strip()
-    if isinstance(context, dict):
-        return str(context.get("text") or "").strip()
-    return str(context or "").strip()
-
-
-def get_retrieved_contexts(row, max_contexts, max_context_chars):
-    contexts = row.get("retrieved_contexts") or []
-    if not isinstance(contexts, list):
-        return []
-
-    output = []
-    for context in contexts[:max_contexts]:
-        text = context_text(context)
-        if not text:
-            continue
-        if max_context_chars > 0:
-            text = text[:max_context_chars]
-        output.append(text)
-    return output
-
-
-def clean_score(value):
-    if value is None:
-        return None
-    result = getattr(value, "value", value)
-    if isinstance(result, float) and math.isnan(result):
-        return None
-    try:
-        number = float(result)
-    except (TypeError, ValueError):
-        return None
-    if math.isnan(number):
-        return None
-    return number
 
 
 async def score_context_recall(scorer, question, gold_answer, retrieved):
@@ -126,22 +82,6 @@ async def evaluate_samples(samples, judge_model, temperature):
     return results
 
 
-def selected_rows(rows, question_ids, limit):
-    selected = [
-        (idx, row)
-        for idx, row in enumerate(rows)
-        if not question_ids or str(row.get("question_id")) in question_ids
-    ]
-    if limit > 0:
-        selected = selected[:limit]
-    return selected
-
-
-def mean_metric(evaluations, key):
-    values = [item.get(key) for item in evaluations if item.get(key) is not None]
-    return sum(values) / len(values) if values else None
-
-
 def summary(rows):
     evaluations = [
         row.get("retrieval_evaluation") or {}
@@ -158,7 +98,7 @@ def summary(rows):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate retrieval context recall, precision, and relevance with RAGAS metrics."
+        description="Evaluate retrieval context recall and precision with RAGAS metrics."
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -196,6 +136,7 @@ def main():
             max_contexts=args.max_contexts,
             max_context_chars=args.max_context_chars,
         )
+
         row["retrieval_evaluation"] = {
             "context_recall": None,
             "context_precision": None,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections import defaultdict
 from contextlib import nullcontext
@@ -22,7 +21,7 @@ from finance_document_qa.pipeline.formatting import (
     _format_table_record,
 )
 from finance_document_qa.pipeline.fusion import (
-    _attach_fusion_scores,  # noqa: F401  # kept for commented-out soft-fusion fallback
+    _attach_fusion_scores,
     _evidence_bucket,
     _item_base_score,
 )
@@ -537,6 +536,21 @@ class PrimaryStatementRetriever(Retriever):
                     "numeric_value": cell.get("numeric_value"),
                     "numeric_kind": cell.get("numeric_kind"),
                     "scale": cell.get("scale"),
+                    "table_title": cell.get("table_title"),
+                    "table_title_source": cell.get("table_title_source"),
+                    "table_title_source_refs": cell.get("table_title_source_refs"),
+                    "table_context_json": cell.get("table_context_json"),
+                    "pages": cell.get("pages"),
+                    "source_refs": cell.get("source_refs"),
+                    "provenance_json": cell.get("provenance_json"),
+                    "provenance_scope": cell.get("provenance_scope"),
+                    "section_paths_json": cell.get("section_paths_json"),
+                    "pipeline_version": cell.get("pipeline_version"),
+                    "source_sha256": cell.get("source_sha256"),
+                    "artifact_id": cell.get("artifact_id"),
+                    "docling_version": cell.get("docling_version"),
+                    "docling_core_version": cell.get("docling_core_version"),
+
                 }
                 cell_item = _format_table_record(cell_record)
                 cell_metadata = dict(cell_item.metadata or {})
@@ -582,7 +596,7 @@ class DualRetriever(Retriever):
     def __init__(
         self,
         driver: neo4j.Driver,
-        chunk_retriever: HybridCypherRetriever,
+        chunk_retriever: HybridCypherRetriever | None,
         table_retriever: Text2CypherRetriever | StyleRoutingText2CypherRetriever,
         primary_retriever: PrimaryStatementRetriever | None = None,
         metrics_retriever: MetricsTableCellRetriever | None = None,
@@ -595,7 +609,7 @@ class DualRetriever(Retriever):
         self.table_retriever = table_retriever
         self.primary_retriever = primary_retriever
         self.metrics_retriever = metrics_retriever
-        self.reranker_model = reranker_model or os.environ.get("RERANKER_MODEL")
+        self.reranker_model = reranker_model
         self.reranker_batch_size = reranker_batch_size
         self._reranker: Any | None = None
 
@@ -693,6 +707,8 @@ class DualRetriever(Retriever):
                 top_k=top_k,
                 effective_search_ratio=effective_search_ratio,
                 query_params=query_params,
+            ) if self.chunk_retriever is not None else RetrieverResult(
+                items=[], metadata={"enabled": False, "reason": "graph_only"}
             )
         except Exception as exc:
             chunk_result = self._failed_result("HybridCypherRetriever", exc)
@@ -840,11 +856,19 @@ class DualRetriever(Retriever):
             ranking_metadata["reranked"] = False
             ranking_metadata["fallback"] = None
 
+        if self.chunk_retriever is None and not items:
+            raise RuntimeError(
+                "Graph retrieval returned no evidence; graph branches failed or found no matches."
+            )
+
         return _sanitize_retriever_result(
             RetrieverResult(
                 items=items,
                 metadata={
-                    "__retriever": "DualRetriever",
+                    "__retriever": (
+                        "DualRetriever" if self.chunk_retriever is not None
+                        else "GraphEvidenceRetriever"
+                    ),
                     "metrics_retriever": metrics_result.metadata,
                     "chunk_retriever": chunk_result.metadata,
                     "table_retriever": table_result.metadata,

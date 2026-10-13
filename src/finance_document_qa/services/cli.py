@@ -13,12 +13,16 @@ from finance_document_qa.services.base import (
     QueryOptions,
 )
 from finance_document_qa.services.graphrag import (
+    FinanceDocumentGraphOnlyService,
     FinanceDocumentGraphRAGService,
     FinanceDocumentText2CypherService,
 )
 from finance_document_qa.services.rag import FinanceDocumentRAGService
+from finance_document_qa.services.routed import FinanceDocumentRoutedService
 
 _SERVICE_BY_MODE: dict[str, type[BaseFinanceDocumentService]] = {
+    "auto": FinanceDocumentRoutedService,
+    "graph": FinanceDocumentGraphOnlyService,
     "hybrid": FinanceDocumentRAGService,
     "dual": FinanceDocumentGraphRAGService,
     "text2cypher": FinanceDocumentText2CypherService,
@@ -47,9 +51,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--retriever-mode",
-        choices=["text2cypher", "hybrid", "dual"],
-        default="text2cypher",
-        help="Retriever mode to use for the batch run.",
+        choices=["auto", "graph", "text2cypher", "hybrid", "dual"],
+        default="auto",
+        help="auto: open-book -> hybrid, numerical -> graph-only. dual is legacy mixed retrieval.",
     )
     parser.add_argument(
         "--top-k", type=int, default=5, help="Top K candidates for hybrid retrieval."
@@ -63,7 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--question-style",
         choices=["direct", "calculation", "domain", "novel", "auto", "llm-auto"],
-        default="direct",
+        default="auto",
         help=(
             "Prompt and Text2Cypher template: direct (single-value), calculation (multi-input), "
             "domain (finance judgment), novel (open-ended), auto (rule-based classification per question), "

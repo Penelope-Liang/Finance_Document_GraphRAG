@@ -122,6 +122,7 @@ class BaseFinanceDocumentService:
         self.use_calculation_executor = use_calculation_executor
         self.calculation_model = calculation_model
         self._available_documents: list[str] | None = None
+        self._query_graph: Any | None = None
 
         self.driver = driver or neo4j.GraphDatabase.driver(
             self.config.neo4j_uri,
@@ -153,7 +154,7 @@ class BaseFinanceDocumentService:
         )
 
         core = self._build_core_retriever()
-        if self.use_reranker and self.retriever_mode != "dual":
+        if self.use_reranker and self.retriever_mode not in {"dual", "graph"}:
             core = RerankingRetriever(
                 inner_retriever=core,
                 cross_encoder_model=self.reranker_model,
@@ -324,6 +325,305 @@ class BaseFinanceDocumentService:
             },
         }
 
+    @staticmethod
+    def _base_record(
+        question: str,
+        question_id: str | None,
+        doc_id: str | None,
+        doc_name: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "question_id": question_id,
+            "doc_id": doc_id,
+            "doc_name": doc_name,
+            "question": question,
+        }
+
+    @staticmethod
+    def _disabled_rewrite_plan(question: str) -> dict[str, Any]:
+        return {
+            "rewritten_query": question,
+            "company": None,
+            "company_source": None,
+            "company_doc_key": None,
+            "years": [],
+            "target_filing_year": None,
+            "operation": "disabled",
+            "components": [],
+            "statements": [],
+        }
+
+    def build_query_plan(
+        self,
+        question: str,
+        *,
+        question_id: str | None = None,
+        doc_id: str | None = None,
+        doc_name: str | None = None,
+        question_reasoning: str | None = None,
+        available_doc_ids: list[str] | None = None,
+        options: QueryOptions | None = None,
+    ) -> dict[str, Any]:
+        options = options or QueryOptions()
+        style = self._classify_style(question, question_reasoning, options.question_style)
+        effective_style = style["effective_style"]
+        plan = (
+            _rewrite_metrics_query_for_retrieval(
+                question,
+                question_style=effective_style,
+                doc_name=doc_name or "",
+                llm=self.llm,
+            )
+            if options.use_query_rewrite
+            else self._disabled_rewrite_plan(question)
+        )
+        row = {
+            "question": question,
+            "doc_id": doc_id,
+            "doc_name": doc_name or "",
+            "question_reasoning": question_reasoning,
+        }
+        retrieval_filter = build_retrieval_filter(
+            row=row,
+            query_rewrite_plan=plan,
+            use_query_rewrite=options.use_query_rewrite,
+            use_gold_doc_id=options.use_gold_doc_id,
+            available_doc_ids=(
+                available_doc_ids
+                if available_doc_ids is not None
+                else self.available_documents
+            ),
+        )
+        rewrite_fields = {
+            "query_rewrite_applied": bool(options.use_query_rewrite),
+            "retrieval_query": plan["rewritten_query"],
+            "query_rewrite_company": plan["company"],
+            "query_rewrite_company_source": plan["company_source"],
+            "query_rewrite_company_doc_key": plan["company_doc_key"],
+            "query_rewrite_years": plan["years"],
+            "query_rewrite_target_filing_year": plan.get("target_filing_year"),
+            "query_rewrite_operation": plan["operation"],
+            "query_rewrite_components": plan["components"],
+            "query_rewrite_statements": plan["statements"],
+            "retrieval_doc_id": retrieval_filter.get("doc_id"),
+            "retrieval_doc_ids": retrieval_filter.get("doc_ids"),
+            "retrieval_doc_id_source": retrieval_filter.get("doc_id_source"),
+            "retrieval_company_doc_key": retrieval_filter.get("company_doc_key"),
+        }
+        record = self._base_record(question, question_id, doc_id, doc_name)
+        record.update(
+            {
+                "run_config": self._build_run_config(
+                    options, effective_style=effective_style
+                ),
+                **style["fields"],
+                **rewrite_fields,
+            }
+        )
+        return {
+            "options": options,
+            "effective_style": effective_style,
+            "query_rewrite_plan": plan,
+            "retrieval_query": plan["rewritten_query"],
+            "retrieval_filter": retrieval_filter,
+            "retrieval_path": "graphrag" if self.retriever_mode in {"dual", "graph"} else "rag",
+            "base_record": record,
+        }
+
+    def build_search_kwargs(
+        self,
+        question: str,
+        *,
+        effective_style: str,
+        retrieval_query: str,
+        retrieval_filter: dict[str, Any],
+        query_rewrite_plan: dict[str, Any],
+        options: QueryOptions,
+    ) -> dict[str, Any]:
+        search_kwargs: dict[str, Any] = {
+            "query_text": retrieval_query,
+            "return_context": True,
+            "examples": build_answer_prompt(question, effective_style),
+        }
+        retriever_config: dict[str, Any] = {}
+        if self.retriever_mode in {"hybrid", "dual", "graph"}:
+            retriever_config = {
+                "top_k": options.top_k,
+                "effective_search_ratio": options.effective_search_ratio,
+                "query_params": retrieval_filter,
+            }
+        if self.retriever_mode in {"dual", "graph"}:
+            retriever_config["t2c_style"] = effective_style
+            if options.use_query_rewrite:
+                retriever_config["retrieval_query_text"] = retrieval_query
+                if effective_style in {"calculation", "domain"}:
+                    retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
+                    retriever_config["metrics_doc_ids"] = (
+                        retrieval_filter.get("doc_ids") or []
+                    )
+                    retriever_config["metrics_company_doc_key"] = retrieval_filter[
+                        "company_doc_key"
+                    ]
+                    retriever_config["metrics_plan"] = query_rewrite_plan
+        elif self.retriever_mode == "text2cypher":
+            retriever_config["t2c_style"] = effective_style
+        if retriever_config:
+            search_kwargs["retriever_config"] = retriever_config
+        return search_kwargs
+
+    def run_rag_search(
+        self,
+        question: str,
+        *,
+        effective_style: str,
+        retrieval_query: str,
+        retrieval_filter: dict[str, Any],
+        query_rewrite_plan: dict[str, Any],
+        options: QueryOptions,
+    ) -> Any:
+        return _rag_search_with_retry(
+            self.rag,
+            max_retries=options.llm_retries,
+            retry_sleep=options.llm_retry_sleep,
+            **self.build_search_kwargs(
+                question,
+                effective_style=effective_style,
+                retrieval_query=retrieval_query,
+                retrieval_filter=retrieval_filter,
+                query_rewrite_plan=query_rewrite_plan,
+                options=options,
+            ),
+        )
+
+    def build_success_record(
+        self,
+        *,
+        base_record: dict[str, Any],
+        result: Any,
+        question: str,
+        question_id: str | None,
+        question_reasoning: str | None,
+        effective_style: str,
+        options: QueryOptions,
+    ) -> dict[str, Any]:
+        raw_answer = result.answer
+        answer_payload = _parse_answer_payload(raw_answer)
+        if answer_payload is not None:
+            answer = answer_payload.get("answer")
+            evidence = answer_payload.get("evidence")
+            missing_information = answer_payload.get("missing_information")
+        else:
+            answer, evidence, missing_information = raw_answer, None, None
+
+        retriever_result = (
+            _sanitize_for_json(result.retriever_result.model_dump())
+            if result.retriever_result is not None
+            else None
+        )
+        retrieved_contexts = _standardize_retrieved_contexts(
+            retriever_result,
+            question_id=str(question_id) if question_id is not None else "",
+        )
+
+        answer_source = "llm"
+        llm_answer_before_calculation = None
+        calculation_executor = None
+        if (
+            self.use_calculation_executor
+            and self._requires_calculation_executor(question_reasoning, effective_style)
+            and self.calc_llm is not None
+        ):
+            llm_answer_before_calculation = answer
+            calculation_evidence = "\n\n".join(
+                part
+                for part in (
+                    f"Current answer:\n{answer}" if answer is not None else "",
+                    f"Answer evidence:\n{evidence}" if evidence else "",
+                    _compact_retriever_evidence(retriever_result),
+                )
+                if part
+            )
+            calculation_executor = run_calculation_pipeline(
+                llm=self.calc_llm,
+                question=question,
+                current_answer=answer,
+                evidence=calculation_evidence,
+            )
+            if (
+                calculation_executor.get("calculation_success")
+                and calculation_executor.get("calculation_answer") is not None
+            ):
+                answer = calculation_executor["calculation_answer"]
+                evidence = (
+                    f"{evidence}\n\n" if evidence else ""
+                ) + "Calculation executor applied."
+                answer_source = "calculation_executor"
+
+        direct_table_fallback = None
+        if (
+            options.use_direct_table_fallback
+            and answer is None
+            and effective_style == "direct"
+        ):
+            answer, direct_table_fallback = _direct_table_cell_fallback(
+                question,
+                retrieved_contexts,
+            )
+            if answer is not None:
+                evidence = (
+                    f"{evidence}\n\n" if evidence else ""
+                ) + "Deterministic direct extraction from TableCell."
+                missing_information = None
+                answer_source = "deterministic_table_cell"
+
+        base_record.update(
+            {
+                "retrieved_contexts": retrieved_contexts,
+                "final_context": retrieved_contexts,
+                "answer": answer,
+                "answer_source": answer_source,
+                "direct_table_fallback": direct_table_fallback,
+                "evidence": evidence,
+                "missing_information": missing_information,
+                "raw_answer": raw_answer,
+                "llm_answer_before_calculation": llm_answer_before_calculation,
+                "calculation_executor": calculation_executor,
+                "retriever_result": retriever_result,
+                "error": None,
+            }
+        )
+        return _sanitize_for_json(base_record)
+
+    def build_error_record(
+        self,
+        *,
+        question: str,
+        question_id: str | None,
+        doc_id: str | None,
+        doc_name: str | None,
+        elapsed: float,
+        error: Exception,
+    ) -> dict[str, Any]:
+        record = self._base_record(question, question_id, doc_id, doc_name)
+        record.update(
+            {
+                "retrieved_contexts": [],
+                "final_context": [],
+                "answer": None,
+                "answer_source": None,
+                "direct_table_fallback": None,
+                "evidence": None,
+                "missing_information": None,
+                "raw_answer": None,
+                "llm_answer_before_calculation": None,
+                "calculation_executor": None,
+                "retriever_result": None,
+                "time_seconds": elapsed,
+                "error": str(error),
+            }
+        )
+        return record
+
     def query(
         self,
         question: str,
@@ -335,247 +635,45 @@ class BaseFinanceDocumentService:
         available_doc_ids: list[str] | None = None,
         options: QueryOptions | None = None,
     ) -> dict[str, Any]:
-        """Run the full retrieval + answer pipeline for a single question."""
+        """Run the production LangGraph workflow for a single question."""
         options = options or QueryOptions()
-        row = {
-            "question": question,
-            "doc_id": doc_id,
-            "doc_name": doc_name or "",
-            "question_reasoning": question_reasoning,
-        }
-        base_record: dict[str, Any] = {
-            "question_id": question_id,
-            "doc_id": doc_id,
-            "doc_name": doc_name,
-            "question": question,
-        }
-
         start = time.time()
         try:
-            doc_ids_scope = (
-                available_doc_ids
-                if available_doc_ids is not None
-                else self.available_documents
-            )
-
-            style = self._classify_style(
-                question, question_reasoning, options.question_style
-            )
-            effective_style = style["effective_style"]
-            style_fields = style["fields"]
-
-            query_rewrite_plan = (
-                _rewrite_metrics_query_for_retrieval(
-                    question,
-                    question_style=effective_style,
-                    doc_name=doc_name or "",
-                    llm=self.llm,
+            if self._query_graph is None:
+                from finance_document_qa.pipeline.langgraph_workflow import (
+                    build_finance_rag_graph,
                 )
-                if options.use_query_rewrite
-                else {
-                    "rewritten_query": question,
-                    "company": None,
-                    "company_source": None,
-                    "company_doc_key": None,
-                    "years": [],
-                    "target_filing_year": None,
-                    "operation": "disabled",
-                    "components": [],
-                    "statements": [],
-                }
-            )
-            query_rewrite_fields: dict[str, Any] = {
-                "query_rewrite_applied": bool(options.use_query_rewrite),
-                "retrieval_query": query_rewrite_plan["rewritten_query"],
-                "query_rewrite_company": query_rewrite_plan["company"],
-                "query_rewrite_company_source": query_rewrite_plan["company_source"],
-                "query_rewrite_company_doc_key": query_rewrite_plan["company_doc_key"],
-                "query_rewrite_years": query_rewrite_plan["years"],
-                "query_rewrite_target_filing_year": query_rewrite_plan.get(
-                    "target_filing_year"
-                ),
-                "query_rewrite_operation": query_rewrite_plan["operation"],
-                "query_rewrite_components": query_rewrite_plan["components"],
-                "query_rewrite_statements": query_rewrite_plan["statements"],
-            }
 
-            retrieval_query_text = query_rewrite_plan["rewritten_query"]
-            retrieval_filter = build_retrieval_filter(
-                row=row,
-                query_rewrite_plan=query_rewrite_plan,
-                use_query_rewrite=options.use_query_rewrite,
-                use_gold_doc_id=options.use_gold_doc_id,
-                available_doc_ids=doc_ids_scope,
-            )
-            query_rewrite_fields["retrieval_doc_id"] = retrieval_filter.get("doc_id")
-            query_rewrite_fields["retrieval_doc_ids"] = retrieval_filter.get("doc_ids")
-            query_rewrite_fields["retrieval_doc_id_source"] = retrieval_filter.get(
-                "doc_id_source"
-            )
-            query_rewrite_fields["retrieval_company_doc_key"] = retrieval_filter.get(
-                "company_doc_key"
-            )
-
-            base_record.update(
+                self._query_graph = build_finance_rag_graph(self)
+            state = self._query_graph.invoke(
                 {
-                    "run_config": self._build_run_config(
-                        options, effective_style=effective_style
+                    "question": question,
+                    "question_id": question_id,
+                    "doc_id": doc_id,
+                    "doc_name": doc_name,
+                    "question_reasoning": question_reasoning,
+                    "available_doc_ids": (
+                        available_doc_ids
+                        if available_doc_ids is not None
+                        else self.available_documents
                     ),
-                    **style_fields,
-                    **query_rewrite_fields,
+                    "options": options,
                 }
             )
-
-            search_kwargs: dict[str, Any] = {
-                "query_text": retrieval_query_text,
-                "return_context": True,
-                "examples": build_answer_prompt(question, effective_style),
-            }
-            retriever_config: dict[str, Any] = {}
-            if self.retriever_mode in {"hybrid", "dual"}:
-                retriever_config = {
-                    "top_k": options.top_k,
-                    "effective_search_ratio": options.effective_search_ratio,
-                    "query_params": retrieval_filter,
-                }
-            if self.retriever_mode == "dual":
-                retriever_config["t2c_style"] = effective_style
-                if options.use_query_rewrite:
-                    retriever_config["retrieval_query_text"] = retrieval_query_text
-                    if effective_style in {"calculation", "domain"}:
-                        retriever_config["metrics_doc_id"] = retrieval_filter["doc_id"]
-                        retriever_config["metrics_doc_ids"] = (
-                            retrieval_filter.get("doc_ids") or []
-                        )
-                        retriever_config["metrics_company_doc_key"] = retrieval_filter[
-                            "company_doc_key"
-                        ]
-                        retriever_config["metrics_plan"] = query_rewrite_plan
-            elif self.retriever_mode == "text2cypher":
-                retriever_config["t2c_style"] = effective_style
-            if retriever_config:
-                search_kwargs["retriever_config"] = retriever_config
-
-            result = _rag_search_with_retry(
-                self.rag,
-                max_retries=options.llm_retries,
-                retry_sleep=options.llm_retry_sleep,
-                **search_kwargs,
-            )
-            raw_answer = result.answer
-            answer_payload = _parse_answer_payload(raw_answer)
-            if answer_payload is not None:
-                answer = answer_payload.get("answer")
-                evidence = answer_payload.get("evidence")
-                missing_information = answer_payload.get("missing_information")
-            else:
-                answer, evidence = raw_answer, None
-                missing_information = None
-
-            retriever_result_dump = (
-                _sanitize_for_json(result.retriever_result.model_dump())
-                if result.retriever_result is not None
-                else None
-            )
-            retrieved_contexts = _standardize_retrieved_contexts(
-                retriever_result_dump,
-                question_id=str(question_id) if question_id is not None else "",
-            )
-
-            answer_source = "llm"
-            llm_answer_before_calculation = None
-            calculation_executor = None
-            should_run_calculation_executor = self._requires_calculation_executor(
-                question_reasoning, effective_style
-            )
-            if (
-                self.use_calculation_executor
-                and should_run_calculation_executor
-                and self.calc_llm is not None
-            ):
-                llm_answer_before_calculation = answer
-                calculation_evidence = "\n\n".join(
-                    part
-                    for part in (
-                        f"Current answer:\n{answer}" if answer is not None else "",
-                        f"Answer evidence:\n{evidence}" if evidence else "",
-                        _compact_retriever_evidence(retriever_result_dump),
-                    )
-                    if part
-                )
-                calculation_executor = run_calculation_pipeline(
-                    llm=self.calc_llm,
-                    question=question,
-                    current_answer=answer,
-                    evidence=calculation_evidence,
-                )
-                if (
-                    calculation_executor.get("calculation_success")
-                    and calculation_executor.get("calculation_answer") is not None
-                ):
-                    answer = calculation_executor["calculation_answer"]
-                    evidence = (
-                        f"{evidence}\n\n" if evidence else ""
-                    ) + "Calculation executor applied."
-                    answer_source = "calculation_executor"
-
-            direct_table_fallback = None
-            if (
-                options.use_direct_table_fallback
-                and answer is None
-                and effective_style == "direct"
-            ):
-                fallback_answer, direct_table_fallback = _direct_table_cell_fallback(
-                    question,
-                    retrieved_contexts,
-                )
-                if fallback_answer is not None:
-                    answer = fallback_answer
-                    evidence = (
-                        f"{evidence}\n\n" if evidence else ""
-                    ) + "Deterministic direct extraction from TableCell."
-                    missing_information = None
-                    answer_source = "deterministic_table_cell"
-
+            record = dict(state["result"])
+            record["time_seconds"] = round(time.time() - start, 2)
+            record["error"] = None
+            return record
+        except Exception as exc:  # noqa: BLE001 - keep API/CLI callers robust
             elapsed = round(time.time() - start, 2)
-            base_record.update(
-                {
-                    "retrieved_contexts": retrieved_contexts,
-                    "final_context": retrieved_contexts,
-                    "answer": answer,
-                    "answer_source": answer_source,
-                    "direct_table_fallback": direct_table_fallback,
-                    "evidence": evidence,
-                    "missing_information": missing_information,
-                    "raw_answer": raw_answer,
-                    "llm_answer_before_calculation": llm_answer_before_calculation,
-                    "calculation_executor": calculation_executor,
-                    "retriever_result": retriever_result_dump,
-                    "time_seconds": elapsed,
-                    "error": None,
-                }
+            return self.build_error_record(
+                question=question,
+                question_id=question_id,
+                doc_id=doc_id,
+                doc_name=doc_name,
+                elapsed=elapsed,
+                error=exc,
             )
-            return base_record
-        except Exception as exc:  # noqa: BLE001 - mirror batch-runner robustness
-            elapsed = round(time.time() - start, 2)
-            base_record.update(
-                {
-                    "retrieved_contexts": [],
-                    "final_context": [],
-                    "answer": None,
-                    "answer_source": None,
-                    "direct_table_fallback": None,
-                    "evidence": None,
-                    "missing_information": None,
-                    "raw_answer": None,
-                    "llm_answer_before_calculation": None,
-                    "calculation_executor": None,
-                    "retriever_result": None,
-                    "time_seconds": elapsed,
-                    "error": str(exc),
-                }
-            )
-            return base_record
 
     # ------------------------------------------------------------------
     # Lifecycle

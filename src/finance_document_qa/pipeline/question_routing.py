@@ -4,7 +4,11 @@ import json
 import re
 from typing import Any, Callable
 
-from finance_document_qa.pipeline.utils import _normalize_text
+from finance_document_qa.pipeline.utils import (
+    _extract_json_object,
+    _normalize_text,
+    _strip_think,
+)
 
 
 ROUTER_PROMPT = """You are routing FinanceBench questions into exactly one QA pipeline.
@@ -42,13 +46,11 @@ Question:
 
 
 def strip_think(text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+    return _strip_think(text)
 
 
 def extract_json_object(text: str) -> str | None:
-    cleaned = strip_think(text)
-    match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    return match.group(0) if match else None
+    return _extract_json_object(text)
 
 
 def classify_question_style_auto(question: str) -> tuple[str, float, str]:

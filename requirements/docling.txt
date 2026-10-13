@@ -1,0 +1,6 @@
+# Tested parsing stack. Keep separate from the online QA environment.
+docling==2.73.1
+docling-core==2.101.1
+docling-ibm-models==3.15.0
+docling-parse==4.7.3
+transformers==4.57.6
