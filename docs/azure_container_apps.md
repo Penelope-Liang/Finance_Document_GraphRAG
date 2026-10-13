@@ -9,7 +9,7 @@ Use these settings for Azure Container Apps:
 
 ```text
 APP_PROFILE=cloud
-RETRIEVER_MODE=dual
+RETRIEVER_MODE=auto
 LLM_BACKEND=azure-openai
 USE_RERANKER=false
 ```
