@@ -26,3 +26,6 @@ third_party_unstructured_src/
 
 # Archived code (kept locally but not tracked)
 /_aricheve/
+
+# Local editor configuration
+/.cursor/
