@@ -88,7 +88,7 @@ async def run_probe(check: Callable[[], Awaitable[None]]) -> DependencyHealth:
     error = None
     try:
         await asyncio.wait_for(check(), timeout=PROBE_TIMEOUT_SECONDS)
-    except (TimeoutError, httpx.TimeoutException):
+    except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException):
         error = "Dependency check timed out"
     except Exception as exc:
         # Exception messages may contain credentials, URLs or provider payloads.
