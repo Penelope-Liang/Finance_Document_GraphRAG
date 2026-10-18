@@ -20,7 +20,7 @@ class FinanceDocumentGraphRAGConfig:
     def from_env(cls) -> "FinanceDocumentGraphRAGConfig":
         return cls(
             neo4j_uri=os.environ.get("NEO4J_URI", cls.neo4j_uri),
-            neo4j_user=os.environ.get("NEO4J_USER", cls.neo4j_user),
+            neo4j_user=os.environ.get("NEO4J_USER") or os.environ.get("NEO4J_USERNAME") or cls.neo4j_user,
             neo4j_database=os.environ.get("NEO4J_DATABASE"),
             vector_index=os.environ.get("NEO4J_VECTOR_INDEX", cls.vector_index),
             fulltext_index=os.environ.get("NEO4J_FULLTEXT_INDEX", cls.fulltext_index),

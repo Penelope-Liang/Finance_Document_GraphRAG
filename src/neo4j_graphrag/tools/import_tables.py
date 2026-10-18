@@ -70,7 +70,12 @@ def _read_tables(path: Path, *, strict: bool) -> dict[str, list[TableChunkRow]]:
         if not isinstance(metadata, dict):
             continue
         table_structured = metadata.get("table_structured")
-        if not isinstance(table_structured, dict):
+        if not isinstance(table_structured, dict) or metadata.get("table_structured_error"):
+            if metadata.get("is_table") or payload.get("chunk_engine") == "elements_table":
+                message = f"row {idx}: table is not prepared; run table_graph_prep on Elements before chunking"
+                if strict:
+                    raise ValueError(message)
+                print(f"[warn] {message}", file=sys.stderr)
             continue
         chunk_id = payload.get("chunk_id")
         doc_id = payload.get("doc_id")
@@ -250,7 +255,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--chunks-path",
         required=True,
-        help="Input chunks_table_structured.ndjson path.",
+        help="Input chunks.ndjson containing prepared table data.",
     )
     parser.add_argument(
         "--cell-mode",

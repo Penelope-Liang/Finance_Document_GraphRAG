@@ -309,14 +309,14 @@ def _classify_grid(
     *,
     title_text: str,
     section_name: str,
-    chunk_text: str,
+    table_text: str,
 ) -> list[list[dict[str, Any]]]:
     if not grid:
         return grid
 
-    # Only use the table title and section name to infer scale — not cell content,
-    # which may contain incidental occurrences of "billion"/"million" in non-unit contexts.
-    scale_label, scale_factor = _infer_scale([title_text, section_name, chunk_text])
+    # Require explicit unit annotations in context or table text; bare scale
+    # words in ordinary cell prose do not establish a table-wide multiplier.
+    scale_label, scale_factor = _infer_scale([title_text, section_name, table_text])
 
     row_has_number: dict[int, bool] = {}
     col_has_number: dict[int, bool] = {}
@@ -439,7 +439,7 @@ def _build_table_structured(
     table_context: list[dict[str, Any]] | None = None,
     title_text: str,
     section_name: str,
-    chunk_text: str,
+    table_text: str,
 ) -> dict[str, Any]:
     if not isinstance(table_data, dict):
         raise ValueError("Native Docling table_data is required; reparse legacy inputs as JSON.")
@@ -453,7 +453,7 @@ def _build_table_structured(
         grid,
         title_text=title_text + " " + context_text,
         section_name=section_name,
-        chunk_text=chunk_text,
+        table_text=table_text,
     )
 
     cells: list[dict[str, Any]] = []
@@ -497,6 +497,35 @@ def _build_table_structured(
     }
 
 
+def prepare_element(row: dict[str, Any], *, strict: bool = True) -> dict[str, Any]:
+    """Prepare one table element without chunk IDs or chunker state.
+
+    Non-table elements pass through unchanged. Original native data and source
+    metadata are retained; derived values live in table_structured.
+    """
+    if "category" not in row or "chunk_id" in row:
+        raise ValueError("Expected an Element record; run table preparation before chunking.")
+    if row["category"] != "Table":
+        return row
+    metadata = dict(row.get("metadata") or {})
+    # Reprocessing must never leave stale successful data after a failed parse.
+    metadata.pop("table_structured", None)
+    metadata.pop("table_structured_error", None)
+    try:
+        metadata["table_structured"] = _build_table_structured(
+            table_data=metadata.get("table_data"),
+            table_context=metadata.get("table_context"),
+            title_text="",
+            section_name=str(row.get("section_hint") or ""),
+            table_text=str(row.get("text") or ""),
+        )
+    except Exception as exc:
+        if strict:
+            raise
+        metadata["table_structured_error"] = str(exc)
+    return {**row, "metadata": metadata}
+
+
 def _iter_ndjson(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -512,15 +541,10 @@ def _iter_ndjson(path: Path) -> list[dict[str, Any]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Attach structured table objects to chunks.ndjson table rows."
+        description="Validate and normalize financial tables in Elements before chunking."
     )
-    parser.add_argument("--chunks-path", required=True, help="Input chunks.ndjson path.")
-    parser.add_argument("--output", required=True, help="Output ndjson path.")
-    parser.add_argument(
-        "--only-should-index",
-        action="store_true",
-        help="Only process rows whose metadata.should_index is true.",
-    )
+    parser.add_argument("--elements-path", required=True, help="Input elements.ndjson path.")
+    parser.add_argument("--output", required=True, help="Output prepared_elements.ndjson path.")
     parser.add_argument(
         "--strict",
         action="store_true",
@@ -531,49 +555,32 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    chunks_path = Path(args.chunks_path).expanduser().resolve()
-    if not chunks_path.exists():
-        print(f"Chunks path does not exist: {chunks_path}", file=sys.stderr)
+    elements_path = Path(args.elements_path).expanduser().resolve()
+    if not elements_path.exists():
+        print(f"Elements path does not exist: {elements_path}", file=sys.stderr)
         sys.exit(1)
 
     output_path = Path(args.output).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    rows = _iter_ndjson(chunks_path)
+    rows = _iter_ndjson(elements_path)
     processed = 0
     errors = 0
-
+    prepared = []
+    for row in rows:
+        result = prepare_element(row, strict=args.strict)
+        if row.get("category") == "Table":
+            if result["metadata"].get("table_structured_error"):
+                errors += 1
+            else:
+                processed += 1
+        prepared.append(result)
+    # Strict validation completes before publishing an output for chunking.
     with output_path.open("w", encoding="utf-8") as out:
-        for row in rows:
-            metadata = dict(row.get("metadata") or {})
-            should_index = bool(metadata.get("should_index", True))
-            if args.only_should_index and not should_index:
-                row["metadata"] = metadata
-                out.write(json.dumps(row, ensure_ascii=False) + "\n")
-                continue
-
-            is_table = bool(metadata.get("is_table")) or str(row.get("chunk_engine") or "") == "elements_table"
-            if is_table:
-                try:
-                    metadata["table_structured"] = _build_table_structured(
-                        table_data=metadata.get("table_data"),
-                        table_context=metadata.get("table_context"),
-                        title_text=str(metadata.get("title_text") or ""),
-                        section_name=str(row.get("section_name") or ""),
-                        chunk_text=str(row.get("text") or ""),
-                    )
-                    processed += 1
-                except Exception as exc:
-                    errors += 1
-                    metadata["table_structured_error"] = str(exc)
-                    if args.strict:
-                        raise
-
-            row["metadata"] = metadata
+        for row in prepared:
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     print("Done.")
-    print(f"Input:      {chunks_path}")
+    print(f"Input:      {elements_path}")
     print(f"Output:     {output_path}")
     print(f"Processed:  {processed}")
     print(f"Errors:     {errors}")

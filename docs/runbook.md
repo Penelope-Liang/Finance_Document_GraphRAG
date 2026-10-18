@@ -2,8 +2,22 @@
 
 ## Health Fails
 
-Check container startup logs, `API_PORT`, and Python import errors. `/health`
-does not connect to Neo4j or Azure OpenAI.
+`GET /health` checks Neo4j and the configured answer LLM concurrently, with a
+10-second timeout per check. Neo4j executes `RETURN 1` in `NEO4J_DATABASE`;
+the LLM receives a minimal generation request using the configured model or
+Azure deployment. It returns HTTP 200 when both pass, or HTTP 503 with
+`checks.neo4j` and `checks.llm` statuses, elapsed times and sanitized errors.
+Provider error text and credentials are not returned.
+
+`GET /health/live` checks only that the API process responds. Use this endpoint
+for frequent startup/liveness probes and container checks without credentials.
+The deeper `/health` call can incur model usage and cold-start latency; use it
+for deployment checks or on-demand diagnostics. Neither endpoint validates
+stored documents, search indexes, the embedding model, or answer correctness.
+
+If `/health/live` fails, check container startup logs, `API_PORT`, and Python
+import errors. If only `/health` fails, inspect the failing dependency and its
+configuration; a cold Ollama model may exceed the check timeout.
 
 ## Query Returns `Missing env var: NEO4J_PASSWORD`
 

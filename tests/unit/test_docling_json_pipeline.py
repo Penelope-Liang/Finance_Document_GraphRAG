@@ -22,7 +22,7 @@ from neo4j_graphrag.preprocess.export.to_elements_ndjson import (
     clean_document_to_element_records,
 )
 from neo4j_graphrag.preprocess.chunk_from_elements import _read_elements, build_chunks
-from neo4j_graphrag.preprocess.table_graph_prep import _build_table_structured
+from neo4j_graphrag.preprocess.table_graph_prep import _build_table_structured, prepare_element
 from neo4j_graphrag.tools.build_graph import (
     _read_chunks,
     _import_doc_tx,
@@ -57,19 +57,9 @@ def adapt(raw, doc_id="APPLE_2018_10K.pdf"):
 def pipeline(doc, tmp_path):
     elements = tmp_path / "elements.ndjson"
     elements.write_text(
-        "\n".join(json.dumps(x) for x in clean_document_to_element_records(doc))
+        "\n".join(json.dumps(prepare_element(x)) for x in clean_document_to_element_records(doc))
     )
     chunks = build_chunks(_read_elements(elements))
-    for chunk in chunks:
-        metadata = chunk["metadata"]
-        if metadata.get("table_data") is not None:
-            metadata["table_structured"] = _build_table_structured(
-                table_data=metadata["table_data"],
-                table_context=metadata["table_context"],
-                title_text=metadata["title_text"],
-                section_name=chunk["section_name"],
-                chunk_text=chunk["text"],
-            )
     path = tmp_path / "tables.ndjson"
     path.write_text("\n".join(json.dumps(x) for x in chunks))
     return chunks, path
@@ -357,7 +347,7 @@ def test_overlapping_cells_are_rejected():
     table.table_data["table_cells"].append(deepcopy(table.table_data["table_cells"][0]))
     with pytest.raises(ValueError, match="Overlapping"):
         _build_table_structured(
-            table_data=table.table_data, title_text="", section_name="", chunk_text=""
+            table_data=table.table_data, title_text="", section_name="", table_text=""
         )
 
 
@@ -419,7 +409,7 @@ def test_numeric_span_emits_one_anchor_and_rate_without_percent_symbol():
         table_data=data,
         title_text="in millions, except rates",
         section_name="",
-        chunk_text="",
+        table_text="",
     )
     assert len(table["numeric_cells"]) == 1
     assert table["numeric_cells"][0]["numeric_kind"] == "PERCENT"
@@ -547,7 +537,7 @@ def test_json_only_pipeline_rejects_missing_table_data_and_retired_cli():
 
     with pytest.raises(ValueError, match="Native Docling table_data is required"):
         _build_table_structured(
-            table_data=None, title_text="", section_name="", chunk_text="legacy table"
+            table_data=None, title_text="", section_name="", table_text="legacy table"
         )
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args([
@@ -555,3 +545,86 @@ def test_json_only_pipeline_rejects_missing_table_data_and_retired_cli():
             '--legacy-markdown',
         ])
     assert exc.value.code == 2
+
+
+def test_table_preparation_is_independent_of_chunking(tmp_path):
+    records = clean_document_to_element_records(adapt(load_apple()))
+    original = deepcopy(records)
+    prepared = [prepare_element(row) for row in records]
+    assert records == original
+    table = next(row for row in prepared if row['category'] == 'Table')
+    assert 'chunk_id' not in table
+    assert table['metadata']['table_structured']['numeric_cells']
+    for before, after in zip(records, prepared):
+        if before['category'] != 'Table':
+            assert before == after
+        else:
+            assert before['metadata']['table_data'] == after['metadata']['table_data']
+            assert before['metadata']['provenance'] == after['metadata']['provenance']
+    path = tmp_path / 'prepared.ndjson'
+    path.write_text('\n'.join(json.dumps(row) for row in prepared))
+    for budget in (100, 2048, 10000):
+        chunks = build_chunks(_read_elements(path), target_max_chars=budget)
+        chunk = next(row for row in chunks if row['metadata']['is_table'])
+        assert chunk['metadata']['table_structured'] == table['metadata']['table_structured']
+        assert chunk['metadata']['table_context'] == table['metadata']['table_context']
+
+
+def test_table_preparation_cli_and_invalid_structure(tmp_path, monkeypatch):
+    from neo4j_graphrag.preprocess.table_graph_prep import main
+
+    records = clean_document_to_element_records(adapt(load_apple()))
+    table = next(row for row in records if row['category'] == 'Table')
+    path = tmp_path / 'elements.ndjson'
+    output = tmp_path / 'prepared.ndjson'
+    def write_input():
+        path.write_text('\n'.join(json.dumps(row) for row in records))
+    write_input()
+    monkeypatch.setattr('sys.argv', [
+        'table_graph_prep', '--elements-path', str(path), '--output', str(output), '--strict'
+    ])
+    main()
+    prepared = [json.loads(line) for line in output.read_text().splitlines()]
+    assert len(prepared) == len(records)
+    assert next(row for row in prepared if row['category'] == 'Table')['metadata']['table_structured']
+    # Validation happens before a chunk exists, and strict failure does not
+    # publish a partial output or overwrite the last successful result.
+    previous_output = output.read_text()
+    table['metadata']['table_data']['table_cells'][0]['end_row_offset_idx'] = 99999
+    write_input()
+    with pytest.raises(ValueError, match='Invalid table cell offsets'):
+        main()
+    assert output.read_text() == previous_output
+
+
+def test_failed_reprepare_clears_stale_cells_and_import_rejects(tmp_path):
+    records = clean_document_to_element_records(adapt(load_apple()))
+    table = next(row for row in records if row['category'] == 'Table')
+    table = prepare_element(table)
+    table['metadata']['table_data']['table_cells'].append(
+        deepcopy(table['metadata']['table_data']['table_cells'][0])
+    )
+    failed = prepare_element(table, strict=False)
+    assert 'table_structured' not in failed['metadata']
+    assert 'Overlapping' in failed['metadata']['table_structured_error']
+    path = tmp_path / 'failed.ndjson'
+    path.write_text(json.dumps(failed))
+    chunks = build_chunks(_read_elements(path))
+    path.write_text('\n'.join(json.dumps(row) for row in chunks))
+    with pytest.raises(ValueError, match='table is not prepared'):
+        _read_tables(path, strict=True)
+    assert _read_tables(path, strict=False) == {}
+    # Repairing and reprocessing also removes the old failure marker.
+    failed['metadata']['table_data']['table_cells'].pop()
+    repaired = prepare_element(failed)
+    assert 'table_structured_error' not in repaired['metadata']
+    assert repaired['metadata']['table_structured']['numeric_cells']
+
+
+def test_table_processor_rejects_chunk_input_and_old_cli():
+    from neo4j_graphrag.preprocess.table_graph_prep import build_parser
+
+    with pytest.raises(ValueError, match='before chunking'):
+        prepare_element({'chunk_id': 'old-chunk', 'metadata': {}})
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(['--chunks-path', 'chunks.ndjson', '--output', 'out.ndjson'])

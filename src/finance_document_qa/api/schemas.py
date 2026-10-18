@@ -5,10 +5,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class DependencyHealth(BaseModel):
+    status: Literal["ok", "error"]
+    latency_ms: float
+    error: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     profile: str
     retriever_mode: str
+    checks: dict[str, DependencyHealth] = Field(default_factory=dict)
 
 
 class QueryRequest(BaseModel):

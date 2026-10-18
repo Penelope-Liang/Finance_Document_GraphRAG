@@ -15,7 +15,7 @@ from neo4j_graphrag.preprocess.chunk_from_elements import _read_elements, build_
 from neo4j_graphrag.preprocess.export.to_elements_ndjson import (
     clean_document_to_element_records,
 )
-from neo4j_graphrag.preprocess.table_graph_prep import _build_table_structured
+from neo4j_graphrag.preprocess.table_graph_prep import prepare_element
 from neo4j_graphrag.tools.build_graph import _read_chunks
 from neo4j_graphrag.tools.import_tables import _read_tables, _build_table_payload
 
@@ -23,7 +23,7 @@ from neo4j_graphrag.tools.import_tables import _read_tables, _build_table_payloa
 def process(doc, output: Path):
     elements = output.with_suffix(".elements.ndjson")
     elements.write_text(
-        "\n".join(json.dumps(x) for x in clean_document_to_element_records(doc)),
+        "\n".join(json.dumps(prepare_element(x)) for x in clean_document_to_element_records(doc)),
         encoding="utf-8",
     )
     chunks = build_chunks(_read_elements(elements))
@@ -31,13 +31,6 @@ def process(doc, output: Path):
     for row in chunks:
         m = row["metadata"]
         if m.get("is_table") or m.get("table_data") is not None:
-            m["table_structured"] = _build_table_structured(
-                table_data=m.get("table_data"),
-                table_context=m.get("table_context"),
-                title_text=m.get("title_text", ""),
-                section_name=row["section_name"],
-                chunk_text=row["text"],
-            )
             cells.extend(
                 {**c, "doc_id": doc.doc_id, "page": row["page"]}
                 for c in m["table_structured"]["numeric_cells"]

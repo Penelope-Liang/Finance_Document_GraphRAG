@@ -49,7 +49,8 @@ flowchart TB
 ```
 
 - **Structured ingestion:** retains reading order, table spans, page coordinates,
-  and supported caption and footnote links in JSON.
+  and supported caption and footnote links in JSON. Financial tables are validated
+  and normalized before chunking.
 - **Financial evidence:** connects filings, sections, chunks, tables, and cells;
   preserves metric names, reporting periods, values, and units.
 - **Question routing:** open-book questions use vector and full-text retrieval.

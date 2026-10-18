@@ -82,7 +82,7 @@ jobs:
             --env RETRIEVER_MODE=auto --env USE_RERANKER=false finance-document-qa:build
           trap 'docker logs qa-health; docker rm --force qa-health' EXIT
           curl --fail --silent --show-error --retry 12 --retry-connrefused \
-            --retry-delay 2 --max-time 5 http://127.0.0.1:18000/health | \
+            --retry-delay 2 --max-time 5 http://127.0.0.1:18000/health/live | \
             jq -e '.status == "ok" and .profile == "cloud" and .retriever_mode == "auto"'
 
       - name: Sign in to Azure with OIDC

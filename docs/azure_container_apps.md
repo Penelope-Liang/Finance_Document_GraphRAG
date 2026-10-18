@@ -4,7 +4,7 @@ The [CD workflow](../.github/workflows/cd.yaml) deploys the API to an existing
 Azure Container App using Azure Container Registry (ACR).
 
 ```text
-main CI succeeds → checks → build container → local /health
+main CI succeeds → checks → build container → local /health/live
                 → push image to ACR → update Container App → deployed /health
 ```
 
@@ -22,7 +22,8 @@ Create an ACR registry and a Container App with:
   to the workflow; configure access controls for `/query` separately.
 - A managed identity configured to pull images from your ACR registry.
 - Startup/readiness probes appropriate for the API, and the environment settings
-  and secrets below. A `/health` probe checks process health only.
+  and secrets below. Use `/health/live` for frequent process probes; `/health`
+  checks the database and answer model and can incur model usage.
 
 CD updates the image and four runtime flags. It does not create cloud resources,
 import PDFs, build graph indexes, or replace your application secrets.
@@ -98,8 +99,9 @@ service when enabled.
 
 The workflow checks the built container before pushing it, waits for the new
 revision to become ready, then calls its application's `/health` endpoint. A
-failure marks the deployment run as failed. This does not verify Neo4j queries,
-model inference, or `/query` answer quality; check those separately after setup.
+failure marks the deployment run as failed. The deployed check executes a small
+Neo4j query and a minimal answer-model request. It does not validate ingested
+data, search indexes, embeddings, or `/query` answer quality.
 
 The Actions summary records the new image, revision, URL, and previous image.
 To restore that previous image:

@@ -58,6 +58,7 @@ class ChunkBuffer:
             self.table_sources = merge_sources([row.metadata])
             self.table_context = row.metadata.get("table_context") or []
             self.table_attrs = {k: row.metadata.get(k) for k in ("possible_continuation", "continuation_reason")}
+            self.table_attrs.update({k: row.metadata[k] for k in ("table_structured", "table_structured_error") if k in row.metadata})
         self.texts.append(row.text.strip())
         self.element_indices.append(row.element_index)
         self.element_types.append(row.category)

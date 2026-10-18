@@ -15,6 +15,6 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
-      - run: uv sync --frozen --extra app --group dev
+      - run: uv sync --frozen --extra app --extra ollama --extra openai --group dev
       - run: uv run ruff check src/finance_document_qa/api scripts/run_api.py tests/api
       - run: uv run pytest tests/api

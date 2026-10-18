@@ -4,8 +4,9 @@ Run these commands from the repository root after completing the README setup.
 Use the same Neo4j database and embedding model for ingestion and retrieval.
 
 ```text
-PDF → Docling JSON → CleanDocument → elements.ndjson → chunks.ndjson
-    → structured tables → Neo4j graph → chunk embeddings → vector index
+PDF → Docling JSON → CleanDocument → elements.ndjson
+    → table preparation → prepared_elements.ndjson → chunks.ndjson
+    → Neo4j graph → chunk embeddings → vector index
 ```
 
 ## 1. Parse PDFs
@@ -34,19 +35,30 @@ under `output/preprocess/docling_raw/`. Parse information records the source has
 parser versions, OCR/device options, page range, and JSON content hash. Keep each
 pair together; the content hash identifies a specific parsing result.
 
-## 2. Build chunks and structured tables
+## 2. Prepare tables, then build chunks
 
 ```bash
 uv run --env-file .env python \
-  -m neo4j_graphrag.preprocess.chunk_from_elements \
+  -m neo4j_graphrag.preprocess.table_graph_prep \
   --elements-path output/preprocess/elements.ndjson \
-  --output output/preprocess/chunks.ndjson
+  --output output/preprocess/prepared_elements.ndjson --strict
 
 uv run --env-file .env python \
-  -m neo4j_graphrag.preprocess.table_graph_prep \
-  --chunks-path output/preprocess/chunks.ndjson \
-  --output output/preprocess/tables.ndjson --strict
+  -m neo4j_graphrag.preprocess.chunk_from_elements \
+  --elements-path output/preprocess/prepared_elements.ndjson \
+  --output output/preprocess/chunks.ndjson
 ```
+
+Table preparation reads each Table Element directly: native cells, section context,
+captions, units and footnotes. It validates spans, associates headers, and normalizes
+financial values before chunking. Original `table_data` stays intact; derived cells
+are stored in `metadata.table_structured`. Non-table elements pass through unchanged.
+The processor does not require chunk IDs. Chunking carries these results into a
+separate table chunk; graph import binds Table and TableCell IDs to that chunk.
+Use `--strict` to stop on malformed tables. Without it, failed tables retain an
+error marker and no structured result; strict table import rejects those records.
+The old table-preparation `--chunks-path` and `--only-should-index` options are
+removed: all table elements are prepared before chunk-level indexing decisions.
 
 The adapter follows Docling body references in reading order. Each text item
 becomes an input block; chunking groups blocks by headings, tables, and character
@@ -66,10 +78,10 @@ The project uses `NEO4J_USER` for the username.
 
 ```bash
 uv run --env-file .env python -m neo4j_graphrag.tools.build_graph \
-  --chunks-path output/preprocess/tables.ndjson --strict
+  --chunks-path output/preprocess/chunks.ndjson --strict
 
 uv run --env-file .env python -m neo4j_graphrag.tools.import_tables \
-  --chunks-path output/preprocess/tables.ndjson --cell-mode numeric --strict
+  --chunks-path output/preprocess/chunks.ndjson --cell-mode numeric --strict
 ```
 
 The chunk importer creates the full-text index by default. The table importer
@@ -102,7 +114,7 @@ step. Retrieval must use the same model and vector dimension.
 ```bash
 uv run --env-file .env --extra ollama python \
   -m neo4j_graphrag.tools.build_chunk_embeddings \
-  --chunks-path output/preprocess/tables.ndjson \
+  --chunks-path output/preprocess/chunks.ndjson \
   --output output/preprocess/embeddings.jsonl
 
 uv run --env-file .env python -m neo4j_graphrag.tools.import_chunk_vectors \
