@@ -10,22 +10,7 @@ Built with **Docling · Neo4j · LangGraph · FastAPI · Ollama / Azure OpenAI**
 
 **1. Build the document index**
 
-```mermaid
-flowchart TB
-    PDF["SEC filings · 10-K / 10-Q"]
-    JSON["Docling JSON"]
-    Data["Section chunks + structured tables"]
-    DB[("Neo4j · document graph + search indexes")]
-
-    PDF --> JSON --> Data --> DB
-
-    classDef source fill:#F1F5F9,stroke:#64748B,color:#0F172A
-    classDef process fill:#EFF6FF,stroke:#2563EB,color:#1E3A8A
-    classDef storage fill:#ECFDF5,stroke:#059669,color:#064E3B
-    class PDF source
-    class JSON,Data process
-    class DB storage
-```
+![Build the document index](docs/images/document-index.svg)
 
 **2. Retrieve evidence and answer**
 
