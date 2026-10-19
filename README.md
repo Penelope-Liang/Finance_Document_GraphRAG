@@ -10,13 +10,13 @@ Built with **Docling · Neo4j · LangGraph · FastAPI · Ollama / Azure OpenAI**
 
 **1. Build the document index**
 
-![Build the document index](docs/images/document-index.svg)
+<img src="docs/images/document-index-v2.svg" alt="Build the document index" width="660">
 
 **2. Retrieve evidence and answer**
 
 Both retrieval paths query the Neo4j index built above.
 
-![Retrieve evidence and answer](docs/images/retrieval.svg)
+<img src="docs/images/retrieval.svg" alt="Retrieve evidence and answer" width="660">
 
 - **Structured ingestion:** retains reading order, table spans, page coordinates,
   and supported caption and footnote links in JSON. Financial tables are validated
