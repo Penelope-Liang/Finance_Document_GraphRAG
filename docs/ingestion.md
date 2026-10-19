@@ -15,7 +15,7 @@ Docling runs in a separate environment with pinned parser dependencies. It may
 download model weights on first use.
 
 ```bash
-uv venv .venv-docling --python 3.13
+uv venv .venv-docling --python 3.12
 uv pip install --python .venv-docling/bin/python -r requirements/docling.txt
 
 PYTHONPATH=src .venv-docling/bin/python \

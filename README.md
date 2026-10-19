@@ -63,15 +63,16 @@ is needed.
 
 ## Get started
 
-You need **Python 3.13**, **uv**, **Neo4j or Aura**, and an **Ollama** server for
+You need **Python 3.12**, **uv**, **Neo4j or Aura**, and an **Ollama** server for
 local generation and embeddings. Azure OpenAI is available for cloud generation.
+The Docker image includes Python 3.12; running from source requires Python 3.12.
 
 **1. Install dependencies.**
 
 ```bash
 git clone https://github.com/Penelope-Liang/Finance_Document_GraphRAG.git
 cd Finance_Document_GraphRAG
-uv sync --python 3.13 --extra app --extra ollama --extra openai
+uv sync --python 3.12 --extra app --extra ollama --extra openai
 ```
 
 **2. Configure the environment.** Create `.env` from [.env.example](.env.example)
