@@ -16,22 +16,7 @@ Built with **Docling · Neo4j · LangGraph · FastAPI · Ollama / Azure OpenAI**
 
 Both retrieval paths query the Neo4j index built above.
 
-```mermaid
-flowchart TB
-    Q["Question"] --> Route{"Question type"}
-    Route -->|Numerical| Graph["Graph retrieval"]
-    Route -->|Open-book| Hybrid["Hybrid retrieval"]
-    Graph -->|Evidence found| Answer["Answer with source evidence"]
-    Hybrid --> Answer
-    Graph -.->|Error or no evidence| Hybrid
-
-    classDef source fill:#F1F5F9,stroke:#64748B,color:#0F172A
-    classDef process fill:#EFF6FF,stroke:#2563EB,color:#1E3A8A
-    classDef output fill:#ECFDF5,stroke:#059669,color:#064E3B
-    class Q,Route source
-    class Graph,Hybrid process
-    class Answer output
-```
+![Retrieve evidence and answer](docs/images/retrieval.svg)
 
 - **Structured ingestion:** retains reading order, table spans, page coordinates,
   and supported caption and footnote links in JSON. Financial tables are validated
@@ -45,6 +30,23 @@ flowchart TB
 API and batch queries share the same LangGraph workflow. `RETRIEVER_MODE=auto`
 enables this routing; numerical queries do not run hybrid search unless fallback
 is needed.
+
+**3. Evaluation**
+
+Evaluate saved answers and retrieved contexts against FinanceBench references:
+
+**Retrieval:** context precision, recall, and relevance using RAGAS.
+
+**Answer Quality:**
+
+- **Open-book Question:** answer accuracy and faithfulness using RAGAS, with yes/no or
+  normalized text matching where applicable.
+- **Numerical Question:** numeric matching after scale normalization, with rounding and
+  tolerance checks; RAGAS also assesses answer accuracy and faithfulness.
+
+Deterministic checks are selected by answer content, not by retrieval route.
+
+See [evaluation commands](docs/usage.md) for running the two evaluation scripts.
 
 ## Get started
 
@@ -82,7 +84,8 @@ uv run --env-file .env --extra app --extra ollama --extra openai \
 
 Open [the API docs](http://localhost:8000/docs) to send a `/query` request.
 Responses include the answer, retrieved evidence, and source metadata.
-`/health` reports service health without checking database or model connectivity.
+`/health` checks Neo4j and the configured answer model; `/health/live` checks only
+that the API responds.
 
 ## Documentation
 
